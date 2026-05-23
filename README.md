@@ -11,3 +11,19 @@
 ```camke
 set(PET_NAME zundamon CACHE STRING "Pet asset directory under pets/")
 ```
+
+## 準備
+
+スプライトを取り込むためにPythonスクリプトを実行しています。PythonスクリプトはPillowモジュールを使っているので、インストールする必要があります。
+
+```powershell
+python3 -m venv .venv
+.venv\Scripts\activate.ps1
+pip install -r requirements.txt
+```
+
+CMakeで使うPythionをvenvの環境で実行するため`.vscode/cmake-kits.json`を編集する必要があります。`Python3_EXECUTABLE`の値を下記のように変更してください。
+
+```json
+"Python3_EXECUTABLE": "${workspaceFolder}/.venv/Scripts/python.exe"
+```
