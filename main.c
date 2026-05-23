@@ -5,10 +5,14 @@
 #include "FT3168.h"
 #include "build/pets/zundamon/generated/pet_images.h"
 #include "GUI_Paint.h"
+#include <stdio.h>
+#include <string.h>
+#include "pico/stdlib.h"
 
 pet_image_t const *PIC;
-int flag=0;
+int flag_click = 0,flag_dclick = 0;
 uint8_t i2c_lock = 0;
+pet_state_t working_state = 0;
 #define I2C_LOCK() i2c_lock = 1
 #define I2C_UNLOCK() i2c_lock = 0
 
@@ -16,6 +20,11 @@ void Touch_INT_callback(uint gpio, uint32_t events);
 
 int main() 
 {
+    stdio_init_all();
+
+    char linebuf[128];
+    int linepos = 0;
+
     if(DEV_Module_Init()!=0){
         return -1;
     }
@@ -40,78 +49,99 @@ int main()
         exit(0);
     }
 
-    /*1.Create a new image cache named IMAGE_RGB and fill it with white*/
+    /* Create a new image cache named IMAGE_RGB and fill it with white*/
     Paint_NewImage((UBYTE *)BlackImage, AMOLED_1IN8.WIDTH, AMOLED_1IN8.HEIGHT, 0, WHITE);
     Paint_SetScale(65);
     Paint_SetRotate(ROTATE_0);
     Paint_Clear(BLACK);
     AMOLED_1IN8_Display(BlackImage);
 
-    /* GUI */
-    printf("drawing...\r\n");
+    /* QMI8658 Init */
+    float acc[3], gyro[3];
+    unsigned int tim_count = 0;
+    const float conversion_factor = 3.3f / (1 << 12) * 3;
+    QMI8658_init();
+    FT3168_Init(FT3168_Gesture_Mode);
+    DEV_KEY_Config(Touch_INT_PIN);
+    DEV_IRQ_SET(Touch_INT_PIN, GPIO_IRQ_EDGE_RISE, &Touch_INT_callback);
 
     /* Refresh the picture in RAM to LCD*/
+    pet_state_t pre_state = PET_STATE_WAVING;
     pet_state_t state = PET_STATE_IDLE;
+    working_state = PET_STATE_IDLE;
+    int frame = 0;
+    int frame_count = pet_state_frame_counts[0];
     while(1)
     {
-        int frame_count = 0;
-        switch(state)
-        {
-            case PET_STATE_IDLE:
-                PIC = pet_idle_frames;
-                frame_count = PET_IDLE_FRAME_COUNT;
-                state = PET_STATE_RUNNING_RIGHT;
+        while(1) {
+            int c = getchar_timeout_us(0);
+            if (c == PICO_ERROR_TIMEOUT || c == PICO_ERROR_NO_DATA)
                 break;
-            case PET_STATE_RUNNING_RIGHT:
-                PIC = pet_running_right_frames;
-                frame_count = PET_RUNNING_RIGHT_FRAME_COUNT;
-                state = PET_STATE_RUNNING_LEFT;
-                break;
-            case PET_STATE_RUNNING_LEFT:
-                PIC = pet_running_left_frames;
-                frame_count = PET_RUNNING_LEFT_FRAME_COUNT;
-                state = PET_STATE_WAVING;
-                break;
-            case PET_STATE_WAVING:
-                PIC = pet_waving_frames;
-                frame_count = PET_WAVING_FRAME_COUNT;
-                state = PET_STATE_JUMPING;
-                break;
-            case PET_STATE_JUMPING:
-                PIC = pet_jumping_frames;
-                frame_count = PET_JUMPING_FRAME_COUNT;
-                state = PET_STATE_FAILED;
-                break;
-            case PET_STATE_FAILED:
-                PIC = pet_failed_frames;
-                frame_count = PET_FAILED_FRAME_COUNT;
-                state = PET_STATE_WAITING;
-                break;
-            case PET_STATE_WAITING:
-                PIC = pet_waiting_frames;
-                frame_count = PET_WAITING_FRAME_COUNT;
-                state = PET_STATE_RUNNING;
-                break;
-            case PET_STATE_RUNNING:
-                PIC = pet_running_frames;
-                frame_count = PET_RUNNING_FRAME_COUNT;
-                state = PET_STATE_REVIEW;
-                break;
-            case PET_STATE_REVIEW:
-                PIC = pet_review_frames;
-                frame_count = PET_REVIEW_FRAME_COUNT;
-                state = PET_STATE_IDLE;
-                break;
-            default:
-                PIC = pet_idle_frames;
-                frame_count = PET_IDLE_FRAME_COUNT;
-                state = PET_STATE_IDLE;
-                break;
+            putchar(c); // エコーバック
+            if (c == '\r' || c == '\n') {
+                if (c == '\r')
+                    putchar('\n');
+                if (linepos > 0) {
+                    linebuf[linepos] = '\0';
+                    // ここでコマンド処理
+                    if (strcmp(linebuf, "idle") == 0) {
+                        working_state = PET_STATE_IDLE;
+                    } else if (strcmp(linebuf, "failed") == 0) {
+                        working_state = PET_STATE_FAILED;
+                    } else if (strcmp(linebuf, "waiting") == 0) {
+                        working_state = PET_STATE_WAITING;
+                    } else if (strcmp(linebuf, "running") == 0) {
+                        working_state = PET_STATE_RUNNING;
+                    } else if (strcmp(linebuf, "review") == 0) {
+                        working_state = PET_STATE_REVIEW;
+                    } else {
+                        printf("Unknown command: %s\n", linebuf);
+                    }
+                    linepos = 0;
+                }
+            } else if (linepos < (int)sizeof(linebuf) - 1) {
+                linebuf[linepos++] = (char)c;
+            }
         }
-        for (int i = 0; i < frame_count; i++) {
-            Paint_DrawImage(PIC[i].data, (AMOLED_1IN8.WIDTH - PET_IMAGE_WIDTH) / 2, (AMOLED_1IN8.HEIGHT - PET_IMAGE_HEIGHT) / 2, PET_IMAGE_WIDTH, PET_IMAGE_HEIGHT);
-            AMOLED_1IN8_Display(BlackImage);
-            DEV_Delay_ms(100);
+
+        if (flag_click) {
+            flag_click = 0;
+            state = PET_STATE_JUMPING;
+        }
+        else if (flag_dclick) {
+            flag_dclick = 0;
+            state = PET_STATE_WAVING;
+        }
+        else if (state == working_state) {
+            while(i2c_lock);
+            I2C_LOCK();
+            QMI8658_read_xyz(acc, gyro, &tim_count);
+            I2C_UNLOCK();
+            if (acc[1] > 200) {
+                state = PET_STATE_RUNNING_RIGHT;
+            }
+            else if (acc[1] < -200) {
+                state = PET_STATE_RUNNING_LEFT;
+            }
+            else {
+                state = working_state;
+            }
+        }
+        if (state != pre_state) {
+            printf("State changed: %d -> %d\n", pre_state, state);
+            pre_state = state;
+            PIC = pet_state_frames[state];
+            frame = 0;
+            frame_count = pet_state_frame_counts[state];
+        }
+        Paint_DrawImage(PIC[frame].data, (AMOLED_1IN8.WIDTH - PET_IMAGE_WIDTH) / 2, (AMOLED_1IN8.HEIGHT - PET_IMAGE_HEIGHT) / 2, PET_IMAGE_WIDTH, PET_IMAGE_HEIGHT);
+        AMOLED_1IN8_Display(BlackImage);
+        DEV_Delay_ms(100);
+        frame++;
+        if (frame >= frame_count) {
+            state = working_state;
+            frame = 0;
+            frame_count = pet_state_frame_counts[state];
         }
     }
 
@@ -130,15 +160,19 @@ void Touch_INT_callback(uint gpio, uint32_t events)
         if(FT3168.mode != FT3168_Point_Mode)
         {
             uint8_t gesture = FT3168_Get_Gesture();
-                
-            if (gesture == FT3168_Gesture_Double_Click)
+
+            if (gesture == FT3168_Gesture_Click)
             {
-                flag = 1;
+                flag_click = 1;
+            }
+            else if (gesture == FT3168_Gesture_Double_Click)
+            {
+                flag_dclick = 1;
             }
         }
         else
         {
-            flag = 1;
+            flag_click = 1;
         }
     }
     else if(gpio == SYS_OUT)
