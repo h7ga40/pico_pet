@@ -176,12 +176,12 @@ static const struct _coeff_div coeff_div[] = {
 
 void es8311_write_reg(uint8_t reg_addr, uint8_t data)
 {
-    return DEV_I2C_Write(ES8311_ADDR, reg_addr, data);
+    return DEV_I2C_Write_Byte(ES8311_ADDR, reg_addr, data);
 }
 
 uint8_t es8311_read_reg(uint8_t reg_addr)
 {
-    return DEV_I2C_ReadByte(ES8311_ADDR, reg_addr);
+    return DEV_I2C_Read_Byte(ES8311_ADDR, reg_addr);
 }
 
 /*

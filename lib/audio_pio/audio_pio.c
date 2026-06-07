@@ -34,9 +34,7 @@
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
 #include "audio_pio.h"
-#include "audio_data.h"
 #include "audio_pio.pio.h"
-#include "music.h"
 
 /******************************************************************************
 function: Mclk frequency modification
@@ -125,60 +123,34 @@ void mclk_pio_init()
     pio_sm_set_enabled(pico_audio.pio_1, pico_audio.sm_mclk , true);
 }
 
-/******************************************************************************
-function: Play Happy Birthday
-******************************************************************************/	
-void Happy_birthday_out()
-{
-    //MCLK
-    mclk_pio_init();
-    //WRITE
-    dout_pio_init(); 
-	int len = 124800;
-    while (true) 
-    {	
-      for(int i = 0; i < len; i++)
-        pio_sm_put_blocking(pico_audio.pio_2, pico_audio.sm_dout, Happy_birsday[i] * 65535);
-    }
-}
-
-/******************************************************************************
-function: Output 440HZ sine wave test
-******************************************************************************/	
-void Sine_440hz_out()
-{
-    //MCLK
-    mclk_pio_init();
-    //WRITE
-    dout_pio_init(); 
-	int len = 24000;
-    while (true) 
-    {	
-      for(int i = 0; i < len; i++)
-        pio_sm_put_blocking(pico_audio.pio_2, pico_audio.sm_dout, Sine_440hz[i] * 65535);
-    }
-}
+static int32_t mic_sample_buffers[8000];
+static int init_flag = 0;
 
 /******************************************************************************
 function: Recording and playback loopback test
 ******************************************************************************/	
 void Loopback_test()
 {
-    static int32_t *mic_sample_buffers;
-    static int mic_num_samples = 120000;
+    //static int32_t *mic_sample_buffers;
+    //static int mic_num_samples = 120000;
+    static int mic_num_samples = sizeof(mic_sample_buffers) / sizeof(mic_sample_buffers[0]);
 
-    mic_sample_buffers = malloc(mic_num_samples * sizeof(int32_t));
-    memset(mic_sample_buffers, 0, mic_num_samples * sizeof(int32_t)); 
+    //mic_sample_buffers = malloc(mic_num_samples * sizeof(int32_t));
+    //memset(mic_sample_buffers, 0, mic_num_samples * sizeof(int32_t)); 
 
-    //MCLK
-    mclk_pio_init();
-    //READ
-    din_pio_init();
-    //WRITE
-    dout_pio_init();
-    pio_sm_set_enabled(pico_audio.pio_2, pico_audio.sm_dout, false);
-    
-    while (true) 
+    if (!init_flag)
+    {
+        //MCLK
+        mclk_pio_init();
+        //READ
+        din_pio_init();
+        //WRITE
+        dout_pio_init();
+        pio_sm_set_enabled(pico_audio.pio_2, pico_audio.sm_dout, false);
+        init_flag = 1;
+    }
+
+    //while (true) 
     {	
         //READ
         pio_sm_set_enabled(pico_audio.pio_1, pico_audio.sm_din, true);
@@ -191,21 +163,5 @@ void Loopback_test()
         for(int i = 0; i < mic_num_samples; i++)
             pio_sm_put_blocking(pico_audio.pio_2, pico_audio.sm_dout, mic_sample_buffers[i]);
         pio_sm_set_enabled(pico_audio.pio_2, pico_audio.sm_dout, false);
-    }
-}
-
-/******************************************************************************
-function: Play music
-******************************************************************************/	
-void Music_out()
-{
-    //MCLK
-    mclk_pio_init();
-    //WRITE
-    dout_pio_init(); 
-    while (true) 
-    {	
-      for(int i = 0; i < AUDIO_SAMPLES; i++)
-        pio_sm_put_blocking(pico_audio.pio_2, pico_audio.sm_dout, audio_data[i] * 65535);
     }
 }

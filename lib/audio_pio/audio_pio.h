@@ -103,9 +103,6 @@ void mclk_pio_init();
 void set_mclk_frequency(uint32_t frequency);
 int32_t* data_treating(const int16_t *audio , uint32_t len) ;
 void audio_out(int32_t *samples, int32_t len);
-void Happy_birthday_out();
-void Sine_440hz_out();
 void Loopback_test();
-void Music_out();
 
 #endif //_PICO_AUDIO_PIO_H

@@ -58,6 +58,7 @@
 #define DOF_INT1     8
 
 #define SYS_OUT      18
+#define PA_CTRL      19
 
 #define Touch_RST_PIN 5
 #define Touch_INT_PIN 4

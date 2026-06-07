@@ -129,6 +129,9 @@ void DEV_GPIO_Init(void)
     gpio_set_dir(Touch_RST_PIN, GPIO_OUT);
     gpio_init(SYS_OUT);
     gpio_set_dir(SYS_OUT, GPIO_IN);
+    gpio_init(PA_CTRL);
+    gpio_set_dir(PA_CTRL, GPIO_OUT);
+    gpio_put(PA_CTRL, 1);
 }
 
 /**

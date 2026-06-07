@@ -45,7 +45,9 @@ target_sources(main PRIVATE
 )
 
 # Add compilation subdirectory
+add_subdirectory(./lib/audio_pio)
 add_subdirectory(./lib/Config)
+add_subdirectory(./lib/es8311)
 add_subdirectory(./lib/QSPI_PIO)
 add_subdirectory(./lib/AMOLED)
 add_subdirectory(./lib/GUI)
@@ -56,7 +58,9 @@ add_subdirectory(./pets)
 add_dependencies(main generate_pet_images)
 
 # Add header file directory
+include_directories(./lib/audio_pio)
 include_directories(./lib/Config)
+include_directories(./lib/es8311)
 include_directories(./lib/QSPI_PIO)
 include_directories(./lib/AMOLED)
 include_directories(./lib/GUI)
@@ -65,7 +69,9 @@ include_directories(./lib/QMI8658)
 include_directories(./lib/Touch)
 
 target_link_libraries(main PRIVATE 
+    audio_pio
     Config
+    es8311
     QSPI_PIO
     AMOLED
     GUI

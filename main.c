@@ -3,6 +3,7 @@
 #include "qspi_pio.h"
 #include "QMI8658.h"
 #include "FT3168.h"
+#include "es8311.h"
 #include "build/pets/zundamon/generated/pet_images.h"
 #include "GUI_Paint.h"
 #include <stdio.h>
@@ -15,6 +16,8 @@ uint8_t i2c_lock = 0;
 pet_state_t working_state = 0;
 #define I2C_LOCK() i2c_lock = 1
 #define I2C_UNLOCK() i2c_lock = 0
+
+UWORD BlackImage[AMOLED_1IN8_HEIGHT*AMOLED_1IN8_WIDTH];
 
 void Touch_INT_callback(uint gpio, uint32_t events);
 
@@ -29,6 +32,17 @@ int main()
         return -1;
     }
 
+    /*Audio Init*/
+    printf("Audio initializing...\r\n");
+    es8311_init(pico_audio);
+    es8311_sample_frequency_config(pico_audio.mclk_freq, pico_audio.sample_freq);
+    es8311_microphone_config();
+    es8311_voice_volume_set(pico_audio.volume);
+    es8311_microphone_gain_set(pico_audio.mic_gain);
+
+    uint16_t chip_id = es8311_read_id();
+    printf("Chip ID:0x%x", chip_id);
+
     // PWR KEY
     DEV_IRQ_SET(SYS_OUT, GPIO_IRQ_LEVEL_HIGH, &Touch_INT_callback);
     
@@ -38,16 +52,16 @@ int main()
     QSPI_4Wrie_Mode(&qspi);
 
     /*AMOLED Init*/
-    printf("1.8inch AMOLED demo...\r\n");
+    printf("1.8inch AMOLED initializing...\r\n");
     AMOLED_1IN8_Init();
     AMOLED_1IN8_SetBrightness(100);
     
-    UDOUBLE Imagesize = AMOLED_1IN8_HEIGHT*AMOLED_1IN8_WIDTH*2;
-    UWORD *BlackImage;
-    if((BlackImage = (UWORD *)malloc(Imagesize)) == NULL) {
-        printf("Failed to apply for black memory...\r\n");
-        exit(0);
-    }
+    // UDOUBLE Imagesize = AMOLED_1IN8_HEIGHT*AMOLED_1IN8_WIDTH*2;
+    // UWORD *BlackImage;
+    // if((BlackImage = (UWORD *)malloc(Imagesize)) == NULL) {
+    //     printf("Failed to apply for black memory...\r\n");
+    //     exit(0);
+    // }
 
     /* Create a new image cache named IMAGE_RGB and fill it with white*/
     Paint_NewImage((UBYTE *)BlackImage, AMOLED_1IN8.WIDTH, AMOLED_1IN8.HEIGHT, 0, WHITE);
@@ -94,6 +108,8 @@ int main()
                         working_state = PET_STATE_RUNNING;
                     } else if (strcmp(linebuf, "review") == 0) {
                         working_state = PET_STATE_REVIEW;
+                    } else if (strcmp(linebuf, "loopback") == 0) {
+                        Loopback_test();
                     } else {
                         printf("Unknown command: %s\n", linebuf);
                     }
@@ -146,8 +162,8 @@ int main()
     }
 
      /* Module Exit */
-     free(BlackImage);
-     BlackImage = NULL;
+    //  free(BlackImage);
+    //  BlackImage = NULL;
      
      DEV_Module_Exit();
 }
