@@ -4,6 +4,23 @@ if(WIN32)
 else()
     set(USERHOME $ENV{HOME})
 endif()
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+set(TTS_PCM_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/generated/tts_test_pcm.c)
+set(TTS_PCM_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/tts_test_pcm.h)
+add_custom_command(
+    OUTPUT ${TTS_PCM_SOURCE} ${TTS_PCM_HEADER}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/scripts/generate_tts_pcm.py
+        --wav ${CMAKE_CURRENT_LIST_DIR}/tts/test_phrase_16k.wav
+        --source ${TTS_PCM_SOURCE}
+        --header ${TTS_PCM_HEADER}
+    DEPENDS
+        ${CMAKE_CURRENT_LIST_DIR}/scripts/generate_tts_pcm.py
+        ${CMAKE_CURRENT_LIST_DIR}/tts/test_phrase_16k.wav
+    COMMENT "Generating 16 kHz TTS PCM data"
+    VERBATIM
+)
 set(sdkVersion 2.2.0)
 set(toolchainVersion 14_2_Rel1)
 set(picotoolVersion 2.2.0-a4)
@@ -43,6 +60,7 @@ pico_generate_pio_header(main ${CMAKE_CURRENT_LIST_DIR}/lib/QSPI_PIO/qspi.pio
 target_sources(main PRIVATE
     main.c
     src/wakeword_stub.c
+    ${TTS_PCM_SOURCE}
 )
 
 # Add compilation subdirectory
@@ -69,6 +87,7 @@ include_directories(./lib/Fonts)
 include_directories(./lib/QMI8658)
 include_directories(./lib/Touch)
 include_directories(./include)
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/generated)
 
 target_link_libraries(main PRIVATE 
     audio_pio

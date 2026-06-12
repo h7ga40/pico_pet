@@ -105,9 +105,9 @@ void set_mclk_frequency(uint32_t frequency);
 int32_t* data_treating(const int16_t *audio , uint32_t len) ;
 void audio_out(int32_t *samples, int32_t len);
 void audio_loopback_start(void);
-void audio_loopback_process(void);
 size_t audio_input_read_latest(int16_t *samples, size_t capacity);
 size_t audio_input_copy_latest(int16_t *samples, size_t capacity);
-void Loopback_test();
+bool audio_play_pcm16_start(const int16_t *samples, size_t sample_count);
+bool audio_playback_is_busy(void);
 
 #endif //_PICO_AUDIO_PIO_H

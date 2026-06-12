@@ -127,7 +127,6 @@ void mclk_pio_init()
 
 #define AUDIO_BLOCK_FRAMES       (PICO_SAMPLE_FREQ / 50)
 #define INPUT_BUFFER_BLOCKS      50
-#define LOOPBACK_DELAY_BLOCKS    25
 #define OUTPUT_BUFFER_BLOCKS     2
 
 static int32_t input_buffer[INPUT_BUFFER_BLOCKS][AUDIO_BLOCK_FRAMES];
@@ -137,10 +136,32 @@ static int loopback_tx_dma = -1;
 static uint32_t input_dma_block;
 static volatile uint32_t input_completed_blocks;
 static volatile uint32_t output_active_block;
-static volatile bool output_ready[OUTPUT_BUFFER_BLOCKS];
-static uint32_t last_processed_input_block = UINT32_MAX;
 static uint32_t last_read_input_sequence = UINT32_MAX;
 static bool loopback_running;
+static const int16_t *playback_samples;
+static size_t playback_sample_count;
+static size_t playback_sample_index;
+static volatile bool playback_running;
+static bool playback_final_block[OUTPUT_BUFFER_BLOCKS];
+
+static void playback_fill_block(uint32_t block)
+{
+    size_t remaining = playback_sample_count - playback_sample_index;
+    size_t count = remaining < AUDIO_BLOCK_FRAMES ? remaining : AUDIO_BLOCK_FRAMES;
+
+    for (size_t i = 0; i < count; ++i) {
+        int16_t sample = playback_samples[playback_sample_index++];
+        uint32_t packed = (uint32_t)(uint16_t)sample << 16;
+        if (pico_audio.channel_count != 1)
+            packed |= (uint16_t)sample;
+        output_buffer[block][i] = (int32_t)packed;
+    }
+    if (count < AUDIO_BLOCK_FRAMES) {
+        memset(&output_buffer[block][count], 0,
+               (AUDIO_BLOCK_FRAMES - count) * sizeof(output_buffer[block][0]));
+    }
+    playback_final_block[block] = playback_sample_index >= playback_sample_count;
+}
 
 static void loopback_dma_handler(void)
 {
@@ -159,41 +180,28 @@ static void loopback_dma_handler(void)
     if (dma_channel_get_irq1_status(loopback_tx_dma))
     {
         dma_channel_acknowledge_irq1(loopback_tx_dma);
-        uint32_t next_block = output_active_block ^ 1u;
-        if (output_ready[next_block])
-        {
-            output_ready[next_block] = false;
-            output_active_block = next_block;
+        if (playback_running) {
+            uint32_t completed_block = output_active_block;
+            if (playback_final_block[completed_block]) {
+                playback_running = false;
+                playback_samples = NULL;
+                memset(output_buffer, 0, sizeof(output_buffer));
+                output_active_block = 0;
+            } else {
+                output_active_block ^= 1u;
+                dma_channel_set_read_addr(loopback_tx_dma,
+                                          output_buffer[output_active_block], false);
+                dma_channel_set_trans_count(loopback_tx_dma, AUDIO_BLOCK_FRAMES, true);
+                if (!playback_final_block[output_active_block])
+                    playback_fill_block(completed_block);
+                return;
+            }
         }
 
         dma_channel_set_read_addr(loopback_tx_dma,
                                   output_buffer[output_active_block], false);
         dma_channel_set_trans_count(loopback_tx_dma, AUDIO_BLOCK_FRAMES, true);
     }
-}
-
-void audio_loopback_process(void)
-{
-    if (!loopback_running)
-        return;
-
-    uint32_t completed_blocks = input_completed_blocks;
-    if (completed_blocks < LOOPBACK_DELAY_BLOCKS)
-        return;
-
-    uint32_t source_sequence = completed_blocks - LOOPBACK_DELAY_BLOCKS;
-    if (source_sequence == last_processed_input_block)
-        return;
-
-    uint32_t destination_block = output_active_block ^ 1u;
-    if (output_ready[destination_block])
-        return;
-
-    uint32_t source_block = source_sequence % INPUT_BUFFER_BLOCKS;
-    memcpy(output_buffer[destination_block], input_buffer[source_block],
-           sizeof(output_buffer[destination_block]));
-    output_ready[destination_block] = true;
-    last_processed_input_block = source_sequence;
 }
 
 static size_t audio_input_copy_block(int16_t *samples, size_t capacity, bool require_new)
@@ -225,6 +233,34 @@ size_t audio_input_copy_latest(int16_t *samples, size_t capacity)
     return audio_input_copy_block(samples, capacity, false);
 }
 
+bool audio_play_pcm16_start(const int16_t *samples, size_t sample_count)
+{
+    if (!loopback_running || playback_running || samples == NULL || sample_count == 0)
+        return false;
+
+    irq_set_enabled(DMA_IRQ_1, false);
+    dma_channel_abort(loopback_tx_dma);
+    dma_channel_acknowledge_irq1(loopback_tx_dma);
+    pio_sm_clear_fifos(pico_audio.pio_2, pico_audio.sm_dout);
+    playback_samples = samples;
+    playback_sample_count = sample_count;
+    playback_sample_index = 0;
+    playback_running = true;
+    output_active_block = 0;
+    playback_fill_block(0);
+    if (!playback_final_block[0])
+        playback_fill_block(1);
+    dma_channel_set_read_addr(loopback_tx_dma, output_buffer[0], false);
+    dma_channel_set_trans_count(loopback_tx_dma, AUDIO_BLOCK_FRAMES, true);
+    irq_set_enabled(DMA_IRQ_1, true);
+    return true;
+}
+
+bool audio_playback_is_busy(void)
+{
+    return playback_running;
+}
+
 void audio_loopback_start(void)
 {
     if (loopback_running)
@@ -242,9 +278,9 @@ void audio_loopback_start(void)
     input_dma_block = 0;
     input_completed_blocks = 0;
     output_active_block = 0;
-    output_ready[0] = false;
-    output_ready[1] = false;
-    last_processed_input_block = UINT32_MAX;
+    playback_running = false;
+    playback_final_block[0] = false;
+    playback_final_block[1] = false;
     last_read_input_sequence = UINT32_MAX;
 
     dma_channel_config rx_config = dma_channel_get_default_config(loopback_rx_dma);
@@ -276,12 +312,4 @@ void audio_loopback_start(void)
 
     loopback_running = true;
     dma_start_channel_mask((1u << loopback_rx_dma) | (1u << loopback_tx_dma));
-}
-
-/******************************************************************************
-function: Recording and playback loopback test
-******************************************************************************/	
-void Loopback_test()
-{
-    audio_loopback_start();
 }

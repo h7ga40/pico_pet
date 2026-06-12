@@ -7,6 +7,7 @@
 #include "build/pets/zundamon/generated/pet_images.h"
 #include "GUI_Paint.h"
 #include "wakeword.h"
+#include "tts_test_pcm.h"
 #include <stdio.h>
 #include <string.h>
 #include "pico/stdlib.h"
@@ -88,6 +89,7 @@ int main()
     working_state = PET_STATE_IDLE;
     int frame = 0;
     int frame_count = pet_state_frame_counts[0];
+    bool tts_was_busy = false;
     absolute_time_t next_audio_process = make_timeout_time_ms(20);
     absolute_time_t next_frame_update = get_absolute_time();
     while(1)
@@ -113,8 +115,6 @@ int main()
                         working_state = PET_STATE_RUNNING;
                     } else if (strcmp(linebuf, "review") == 0) {
                         working_state = PET_STATE_REVIEW;
-                    } else if (strcmp(linebuf, "loopback") == 0) {
-                        Loopback_test();
                     } else if (strcmp(linebuf, "mic") == 0) {
                         int16_t samples[PICO_SAMPLE_FREQ / 50];
                         size_t sample_count = audio_input_copy_latest(samples, PICO_SAMPLE_FREQ / 50);
@@ -135,6 +135,16 @@ int main()
                                    (long)peak,
                                    sum_squares / (int64_t)sample_count);
                         }
+                    } else if (strcmp(linebuf, "tts") == 0) {
+                        if (audio_play_pcm16_start(g_tts_test_pcm,
+                                                   g_tts_test_pcm_sample_count)) {
+                            printf("TTS PCM playback: %u samples at 16000 Hz\n",
+                                   (unsigned)g_tts_test_pcm_sample_count);
+                            wakeword_set_debug_enabled(false);
+                            tts_was_busy = true;
+                        } else {
+                            printf("TTS playback busy\n");
+                        }
                     } else {
                         printf("Unknown command: %s\n", linebuf);
                     }
@@ -146,13 +156,23 @@ int main()
         }
 
         if (time_reached(next_audio_process)) {
-            audio_loopback_process();
             int16_t wakeword_samples[PICO_SAMPLE_FREQ / 50];
             size_t wakeword_sample_count = audio_input_read_latest(
                 wakeword_samples, PICO_SAMPLE_FREQ / 50);
-            if (wakeword_sample_count > 0 &&
+            if (audio_playback_is_busy()) {
+                tts_was_busy = true;
+            } else if (tts_was_busy) {
+                tts_was_busy = false;
+                wakeword_set_debug_enabled(true);
+                printf("TTS playback complete\n");
+            } else if (wakeword_sample_count > 0 &&
                 wakeword_process_frame(wakeword_samples, wakeword_sample_count)) {
                 printf("Wakeword event detected\n");
+                if (audio_play_pcm16_start(g_tts_test_pcm,
+                                           g_tts_test_pcm_sample_count)) {
+                    wakeword_set_debug_enabled(false);
+                    tts_was_busy = true;
+                }
             }
             next_audio_process = make_timeout_time_ms(20);
         }
