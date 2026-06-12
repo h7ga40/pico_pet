@@ -139,6 +139,7 @@ static volatile uint32_t input_completed_blocks;
 static volatile uint32_t output_active_block;
 static volatile bool output_ready[OUTPUT_BUFFER_BLOCKS];
 static uint32_t last_processed_input_block = UINT32_MAX;
+static uint32_t last_read_input_sequence = UINT32_MAX;
 static bool loopback_running;
 
 static void loopback_dma_handler(void)
@@ -195,6 +196,24 @@ void audio_loopback_process(void)
     last_processed_input_block = source_sequence;
 }
 
+size_t audio_input_read_latest(int16_t *samples, size_t capacity)
+{
+    if (!loopback_running || samples == NULL || capacity == 0)
+        return 0;
+
+    uint32_t completed_blocks = input_completed_blocks;
+    if (completed_blocks == 0 || completed_blocks == last_read_input_sequence)
+        return 0;
+
+    uint32_t source_block = (completed_blocks - 1) % INPUT_BUFFER_BLOCKS;
+    size_t sample_count = capacity < AUDIO_BLOCK_FRAMES ? capacity : AUDIO_BLOCK_FRAMES;
+    for (size_t i = 0; i < sample_count; ++i)
+        samples[i] = (int16_t)(input_buffer[source_block][i] >> 16);
+
+    last_read_input_sequence = completed_blocks;
+    return sample_count;
+}
+
 void audio_loopback_start(void)
 {
     if (loopback_running)
@@ -215,6 +234,7 @@ void audio_loopback_start(void)
     output_ready[0] = false;
     output_ready[1] = false;
     last_processed_input_block = UINT32_MAX;
+    last_read_input_sequence = UINT32_MAX;
 
     dma_channel_config rx_config = dma_channel_get_default_config(loopback_rx_dma);
     channel_config_set_transfer_data_size(&rx_config, DMA_SIZE_32);

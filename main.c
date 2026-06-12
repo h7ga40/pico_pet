@@ -113,6 +113,26 @@ int main()
                         working_state = PET_STATE_REVIEW;
                     } else if (strcmp(linebuf, "loopback") == 0) {
                         Loopback_test();
+                    } else if (strcmp(linebuf, "mic") == 0) {
+                        int16_t samples[PICO_SAMPLE_FREQ / 50];
+                        size_t sample_count = audio_input_read_latest(samples, PICO_SAMPLE_FREQ / 50);
+                        int32_t peak = 0;
+                        int64_t sum_squares = 0;
+                        for (size_t i = 0; i < sample_count; ++i) {
+                            int32_t sample = samples[i];
+                            int32_t magnitude = sample < 0 ? -sample : sample;
+                            if (magnitude > peak)
+                                peak = magnitude;
+                            sum_squares += (int64_t)sample * sample;
+                        }
+                        if (sample_count == 0) {
+                            printf("Mic: no new samples\n");
+                        } else {
+                            printf("Mic: samples=%u peak=%ld mean_square=%lld\n",
+                                   (unsigned)sample_count,
+                                   (long)peak,
+                                   sum_squares / (int64_t)sample_count);
+                        }
                     } else {
                         printf("Unknown command: %s\n", linebuf);
                     }

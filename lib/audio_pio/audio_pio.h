@@ -33,12 +33,13 @@
 #include "pico/stdlib.h"
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
+#include <stddef.h>
 
 #define AUDIO_PIO __CONCAT(pio, PICO_AUDIO_PIO)
 #define GPIO_FUNC_PIOx __CONCAT(GPIO_FUNC_PIO, PICO_AUDIO_PIO)
 
-#define PICO_MCLK_FREQ      24000 * 256
-#define PICO_SAMPLE_FREQ    24000
+#define PICO_MCLK_FREQ      (16000 * 256)
+#define PICO_SAMPLE_FREQ    16000
 #define PICO_AUDIO_VOLUME   73
 #define PICO_AUDIO_COUNT    1
 #define PICO_AUDIO_RES_IN   16
@@ -105,6 +106,7 @@ int32_t* data_treating(const int16_t *audio , uint32_t len) ;
 void audio_out(int32_t *samples, int32_t len);
 void audio_loopback_start(void);
 void audio_loopback_process(void);
+size_t audio_input_read_latest(int16_t *samples, size_t capacity);
 void Loopback_test();
 
 #endif //_PICO_AUDIO_PIO_H
