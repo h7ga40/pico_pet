@@ -1,56 +1,73 @@
 # Pico Pet
 
-[RP2350 Touch AMOLED](https://www.waveshare.com/RP2350-Touch-AMOLED-1.8.htm)に Codex Pet の `spritesheet.webp` を利用して、OLEDに表示するアプリ。
+Waveshare RP2350 Touch AMOLED 1.8でCodex Petを表示し、タッチ、加速度、
+16 kHz音声入力、ウェイクワード検出、音声再生を行うアプリです。
 
-`pets/zundamon`のフォルダに下記からダウンロードした`spritesheet.webp`を入れてください。
+## ペット画像
 
-<https://codex-pet.org/pets/zundamon/>
+`pets/zundamon`へ`spritesheet.webp`を配置します。別のペットを使う場合は
+`CMakeLists.txt`の`PET_NAME`を変更してください。
 
-別のスプライトを使用したい場合は、`pets`フォルダに適当な名前でフォルダを作り`spritesheet.webp`を入れ、`CMakeLists.txt`の下記の部分のフォルダ名を書き換えてください。
-
-```camke
+```cmake
 set(PET_NAME zundamon CACHE STRING "Pet asset directory under pets/")
 ```
 
-## 準備
-
-スプライトを取り込むためにPythonスクリプトを実行しています。PythonスクリプトはPillowモジュールを使っているので、インストールする必要があります。
+## Python環境
 
 ```powershell
-python3 -m venv .venv
-.venv\Scripts\activate.ps1
+python -m venv .venv
+.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-CMakeで使うPythionをvenvの環境で実行するため`.vscode/cmake-kits.json`を編集する必要があります。`Python3_EXECUTABLE`の値を下記のように変更してください。
+## 学習データの録音
 
-```json
-"Python3_EXECUTABLE": "${workspaceFolder}/.venv/Scripts/python.exe"
+ファームウェアの`record <seconds>`コマンドは、16 kHz、16-bit、モノラルPCMを
+USBシリアルへ送信します。標準の録音時間は2秒です。
+
+```powershell
+python scripts\record_wav.py COM5 output.wav
+python scripts\collect_sample.py COM5 positive
+python scripts\collect_sample.py COM5 near_miss
+python scripts\collect_sample.py COM5 negative
+python scripts\inspect_wav.py samples
 ```
 
-## ウェイクワード学習ツール
-
-学習用WAVは16 kHz、16-bit、モノラルで用意します。データセットは次の構成です。
+データセットは次の構成にします。`samples`はGit管理対象外です。
 
 ```text
 samples/
   positive/
-  negative/
   near_miss/
+  negative/
 ```
 
-RP2350向けの小型モデルは次のコマンドで学習・確認・C配列化できます。
+## ウェイクワード学習
 
 ```powershell
-python scripts/train_kws_tiny.py --samples samples --out models/kws_tiny
-python scripts/predict_kws_tiny.py --model models/kws_tiny/model_int8.tflite `
-  --labels models/kws_tiny/labels.json samples/positive/example.wav
-python scripts/tflite_to_c_array.py models/kws_tiny/model_int8.tflite
+python scripts\train_kws_tiny.py --samples samples --out models\kws_tiny
+python scripts\predict_kws_tiny.py `
+  --model models\kws_tiny\model_int8.tflite `
+  --labels models\kws_tiny\labels.json samples
+python scripts\export_kws_dense.py models\kws_tiny\model_int8.tflite
 ```
 
-ログメル特徴量モデルには`train_kws_logmel.py`、通常のKerasモデルには
-`train_kws.py`を使用します。`test_speech_features.py`はPython側の16 kHz特徴量計算を
-固定テストデータと比較します。
+`export_kws_dense.py`は学習済みDenseモデルを
+`src/kws_model_weights.c`と`include/kws_model_weights.h`へ変換します。
 
-`record_wav.py`と`collect_sample.py`は、デバイス側のPCM転送コマンドを追加する段階で
-使用します。現在のファームウェアはまだPCM転送コマンドを実装していません。
+## 音声再生
+
+`tts/test_phrase_16k.wav`は16 kHz、16-bit、モノラルWAVにしてください。
+ビルド時に`generate_tts_pcm.py`でファームウェア用PCMへ変換されます。
+シリアルから`tts`を入力すると、アニメーションを止めずに再生します。
+
+## scripts
+
+- `pet_spritesheet_to_bins.py`: ペット画像変換
+- `record_wav.py`: 任意パスへの録音
+- `collect_sample.py`: クラス別学習データ収集
+- `inspect_wav.py`: WAV形式と音量の確認
+- `train_kws_tiny.py`: RP2350向け軽量KWS学習
+- `predict_kws_tiny.py`: 学習済みモデルの評価
+- `export_kws_dense.py`: モデル重みのC変換
+- `generate_tts_pcm.py`: 16 kHz WAVのC PCM変換

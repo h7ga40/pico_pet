@@ -43,7 +43,13 @@ def load_wav(path: Path) -> np.ndarray:
     if audio.shape[0] < SAMPLE_COUNT:
         audio = np.pad(audio, (0, SAMPLE_COUNT - audio.shape[0]))
     elif audio.shape[0] > SAMPLE_COUNT:
-        audio = audio[:SAMPLE_COUNT]
+        energy_window = SAMPLE_RATE // 10
+        squared = audio * audio
+        cumulative = np.concatenate(([0.0], np.cumsum(squared, dtype=np.float64)))
+        energies = cumulative[energy_window:] - cumulative[:-energy_window]
+        peak_center = int(np.argmax(energies)) + energy_window // 2
+        start = max(0, min(peak_center - SAMPLE_COUNT // 2, audio.shape[0] - SAMPLE_COUNT))
+        audio = audio[start:start + SAMPLE_COUNT]
     return audio
 
 

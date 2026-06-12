@@ -204,28 +204,42 @@ static void loopback_dma_handler(void)
     }
 }
 
-static size_t audio_input_copy_block(int16_t *samples, size_t capacity, bool require_new)
+static size_t audio_input_copy_block(int16_t *samples, size_t capacity, bool read_next)
 {
     if (!loopback_running || samples == NULL || capacity == 0)
         return 0;
 
     uint32_t completed_blocks = input_completed_blocks;
-    if (completed_blocks == 0 || (require_new && completed_blocks == last_read_input_sequence))
+    if (completed_blocks == 0)
         return 0;
 
-    uint32_t source_block = (completed_blocks - 1) % INPUT_BUFFER_BLOCKS;
+    uint32_t source_sequence = completed_blocks - 1;
+    if (read_next) {
+        if (last_read_input_sequence == UINT32_MAX)
+            last_read_input_sequence = source_sequence;
+        else if (last_read_input_sequence >= completed_blocks)
+            return 0;
+        else if (completed_blocks - last_read_input_sequence > INPUT_BUFFER_BLOCKS)
+            last_read_input_sequence = completed_blocks - INPUT_BUFFER_BLOCKS;
+        source_sequence = last_read_input_sequence++;
+    }
+
+    uint32_t source_block = source_sequence % INPUT_BUFFER_BLOCKS;
     size_t sample_count = capacity < AUDIO_BLOCK_FRAMES ? capacity : AUDIO_BLOCK_FRAMES;
     for (size_t i = 0; i < sample_count; ++i)
         samples[i] = (int16_t)(input_buffer[source_block][i] >> 16);
 
-    if (require_new)
-        last_read_input_sequence = completed_blocks;
     return sample_count;
+}
+
+size_t audio_input_read_next(int16_t *samples, size_t capacity)
+{
+    return audio_input_copy_block(samples, capacity, true);
 }
 
 size_t audio_input_read_latest(int16_t *samples, size_t capacity)
 {
-    return audio_input_copy_block(samples, capacity, true);
+    return audio_input_copy_block(samples, capacity, false);
 }
 
 size_t audio_input_copy_latest(int16_t *samples, size_t capacity)

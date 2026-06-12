@@ -24,7 +24,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("port", help="Serial port, for example COM5")
     parser.add_argument("output", help="Output WAV path")
-    parser.add_argument("--seconds", type=int, default=5)
+    parser.add_argument("--seconds", type=int, default=2)
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout-padding", type=float, default=10.0)
     args = parser.parse_args()

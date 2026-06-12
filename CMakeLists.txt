@@ -59,6 +59,8 @@ pico_generate_pio_header(main ${CMAKE_CURRENT_LIST_DIR}/lib/QSPI_PIO/qspi.pio
 
 target_sources(main PRIVATE
     main.c
+    src/kws_model.c
+    src/kws_model_weights.c
     src/wakeword_stub.c
     ${TTS_PCM_SOURCE}
 )

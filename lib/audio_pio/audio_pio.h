@@ -105,6 +105,7 @@ void set_mclk_frequency(uint32_t frequency);
 int32_t* data_treating(const int16_t *audio , uint32_t len) ;
 void audio_out(int32_t *samples, int32_t len);
 void audio_loopback_start(void);
+size_t audio_input_read_next(int16_t *samples, size_t capacity);
 size_t audio_input_read_latest(int16_t *samples, size_t capacity);
 size_t audio_input_copy_latest(int16_t *samples, size_t capacity);
 bool audio_play_pcm16_start(const int16_t *samples, size_t sample_count);

@@ -34,7 +34,7 @@ def main() -> None:
     parser.add_argument("port", help="Serial port, for example COM3")
     parser.add_argument("label", choices=VALID_LABELS)
     parser.add_argument("--root", default="samples", help="Dataset output root")
-    parser.add_argument("--seconds", type=int, default=5)
+    parser.add_argument("--seconds", type=int, default=2)
     parser.add_argument("--prefix", default=None)
     args = parser.parse_args()
 

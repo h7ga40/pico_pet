@@ -25,3 +25,9 @@ _ref/
 build/
 pets/**
 !pets/CMakeLists.txt
+samples/**
+!samples/CMakeLists.txt
+__pycache__/
+*.pyc
+*.keras
+history.json
