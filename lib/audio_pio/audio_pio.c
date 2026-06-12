@@ -196,13 +196,13 @@ void audio_loopback_process(void)
     last_processed_input_block = source_sequence;
 }
 
-size_t audio_input_read_latest(int16_t *samples, size_t capacity)
+static size_t audio_input_copy_block(int16_t *samples, size_t capacity, bool require_new)
 {
     if (!loopback_running || samples == NULL || capacity == 0)
         return 0;
 
     uint32_t completed_blocks = input_completed_blocks;
-    if (completed_blocks == 0 || completed_blocks == last_read_input_sequence)
+    if (completed_blocks == 0 || (require_new && completed_blocks == last_read_input_sequence))
         return 0;
 
     uint32_t source_block = (completed_blocks - 1) % INPUT_BUFFER_BLOCKS;
@@ -210,8 +210,19 @@ size_t audio_input_read_latest(int16_t *samples, size_t capacity)
     for (size_t i = 0; i < sample_count; ++i)
         samples[i] = (int16_t)(input_buffer[source_block][i] >> 16);
 
-    last_read_input_sequence = completed_blocks;
+    if (require_new)
+        last_read_input_sequence = completed_blocks;
     return sample_count;
+}
+
+size_t audio_input_read_latest(int16_t *samples, size_t capacity)
+{
+    return audio_input_copy_block(samples, capacity, true);
+}
+
+size_t audio_input_copy_latest(int16_t *samples, size_t capacity)
+{
+    return audio_input_copy_block(samples, capacity, false);
 }
 
 void audio_loopback_start(void)

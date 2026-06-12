@@ -42,6 +42,7 @@ pico_generate_pio_header(main ${CMAKE_CURRENT_LIST_DIR}/lib/QSPI_PIO/qspi.pio
 
 target_sources(main PRIVATE
     main.c
+    src/wakeword_stub.c
 )
 
 # Add compilation subdirectory
@@ -67,6 +68,7 @@ include_directories(./lib/GUI)
 include_directories(./lib/Fonts)
 include_directories(./lib/QMI8658)
 include_directories(./lib/Touch)
+include_directories(./include)
 
 target_link_libraries(main PRIVATE 
     audio_pio

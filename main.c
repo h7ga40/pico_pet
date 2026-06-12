@@ -6,6 +6,7 @@
 #include "es8311.h"
 #include "build/pets/zundamon/generated/pet_images.h"
 #include "GUI_Paint.h"
+#include "wakeword.h"
 #include <stdio.h>
 #include <string.h>
 #include "pico/stdlib.h"
@@ -40,6 +41,7 @@ int main()
     es8311_voice_volume_set(pico_audio.volume);
     es8311_microphone_gain_set(pico_audio.mic_gain);
     audio_loopback_start();
+    wakeword_init();
 
     uint16_t chip_id = es8311_read_id();
     printf("Chip ID:0x%x", chip_id);
@@ -115,7 +117,7 @@ int main()
                         Loopback_test();
                     } else if (strcmp(linebuf, "mic") == 0) {
                         int16_t samples[PICO_SAMPLE_FREQ / 50];
-                        size_t sample_count = audio_input_read_latest(samples, PICO_SAMPLE_FREQ / 50);
+                        size_t sample_count = audio_input_copy_latest(samples, PICO_SAMPLE_FREQ / 50);
                         int32_t peak = 0;
                         int64_t sum_squares = 0;
                         for (size_t i = 0; i < sample_count; ++i) {
@@ -145,6 +147,13 @@ int main()
 
         if (time_reached(next_audio_process)) {
             audio_loopback_process();
+            int16_t wakeword_samples[PICO_SAMPLE_FREQ / 50];
+            size_t wakeword_sample_count = audio_input_read_latest(
+                wakeword_samples, PICO_SAMPLE_FREQ / 50);
+            if (wakeword_sample_count > 0 &&
+                wakeword_process_frame(wakeword_samples, wakeword_sample_count)) {
+                printf("Wakeword event detected\n");
+            }
             next_audio_process = make_timeout_time_ms(20);
         }
 

@@ -107,6 +107,7 @@ void audio_out(int32_t *samples, int32_t len);
 void audio_loopback_start(void);
 void audio_loopback_process(void);
 size_t audio_input_read_latest(int16_t *samples, size_t capacity);
+size_t audio_input_copy_latest(int16_t *samples, size_t capacity);
 void Loopback_test();
 
 #endif //_PICO_AUDIO_PIO_H
