@@ -39,6 +39,7 @@ int main()
     es8311_microphone_config();
     es8311_voice_volume_set(pico_audio.volume);
     es8311_microphone_gain_set(pico_audio.mic_gain);
+    audio_loopback_start();
 
     uint16_t chip_id = es8311_read_id();
     printf("Chip ID:0x%x", chip_id);
@@ -85,6 +86,8 @@ int main()
     working_state = PET_STATE_IDLE;
     int frame = 0;
     int frame_count = pet_state_frame_counts[0];
+    absolute_time_t next_audio_process = make_timeout_time_ms(20);
+    absolute_time_t next_frame_update = get_absolute_time();
     while(1)
     {
         while(1) {
@@ -120,6 +123,17 @@ int main()
             }
         }
 
+        if (time_reached(next_audio_process)) {
+            audio_loopback_process();
+            next_audio_process = make_timeout_time_ms(20);
+        }
+
+        if (!time_reached(next_frame_update)) {
+            sleep_ms(1);
+            continue;
+        }
+        next_frame_update = make_timeout_time_ms(100);
+
         if (flag_click) {
             flag_click = 0;
             state = PET_STATE_JUMPING;
@@ -152,7 +166,6 @@ int main()
         }
         Paint_DrawImage(PIC[frame].data, (AMOLED_1IN8.WIDTH - PET_IMAGE_WIDTH) / 2, (AMOLED_1IN8.HEIGHT - PET_IMAGE_HEIGHT) / 2, PET_IMAGE_WIDTH, PET_IMAGE_HEIGHT);
         AMOLED_1IN8_Display(BlackImage);
-        DEV_Delay_ms(100);
         frame++;
         if (frame >= frame_count) {
             state = working_state;

@@ -31,6 +31,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "pico/stdlib.h"
+#include "hardware/dma.h"
+#include "hardware/irq.h"
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
 #include "audio_pio.h"
@@ -123,45 +125,132 @@ void mclk_pio_init()
     pio_sm_set_enabled(pico_audio.pio_1, pico_audio.sm_mclk , true);
 }
 
-static int32_t mic_sample_buffers[8000];
-static int init_flag = 0;
+#define AUDIO_BLOCK_FRAMES       (PICO_SAMPLE_FREQ / 50)
+#define INPUT_BUFFER_BLOCKS      50
+#define LOOPBACK_DELAY_BLOCKS    25
+#define OUTPUT_BUFFER_BLOCKS     2
+
+static int32_t input_buffer[INPUT_BUFFER_BLOCKS][AUDIO_BLOCK_FRAMES];
+static int32_t output_buffer[OUTPUT_BUFFER_BLOCKS][AUDIO_BLOCK_FRAMES];
+static int loopback_rx_dma = -1;
+static int loopback_tx_dma = -1;
+static uint32_t input_dma_block;
+static volatile uint32_t input_completed_blocks;
+static volatile uint32_t output_active_block;
+static volatile bool output_ready[OUTPUT_BUFFER_BLOCKS];
+static uint32_t last_processed_input_block = UINT32_MAX;
+static bool loopback_running;
+
+static void loopback_dma_handler(void)
+{
+    if (dma_channel_get_irq1_status(loopback_rx_dma))
+    {
+        dma_channel_acknowledge_irq1(loopback_rx_dma);
+        input_completed_blocks++;
+        input_dma_block++;
+        if (input_dma_block == INPUT_BUFFER_BLOCKS)
+            input_dma_block = 0;
+
+        dma_channel_set_write_addr(loopback_rx_dma, input_buffer[input_dma_block], false);
+        dma_channel_set_trans_count(loopback_rx_dma, AUDIO_BLOCK_FRAMES, true);
+    }
+
+    if (dma_channel_get_irq1_status(loopback_tx_dma))
+    {
+        dma_channel_acknowledge_irq1(loopback_tx_dma);
+        uint32_t next_block = output_active_block ^ 1u;
+        if (output_ready[next_block])
+        {
+            output_ready[next_block] = false;
+            output_active_block = next_block;
+        }
+
+        dma_channel_set_read_addr(loopback_tx_dma,
+                                  output_buffer[output_active_block], false);
+        dma_channel_set_trans_count(loopback_tx_dma, AUDIO_BLOCK_FRAMES, true);
+    }
+}
+
+void audio_loopback_process(void)
+{
+    if (!loopback_running)
+        return;
+
+    uint32_t completed_blocks = input_completed_blocks;
+    if (completed_blocks < LOOPBACK_DELAY_BLOCKS)
+        return;
+
+    uint32_t source_sequence = completed_blocks - LOOPBACK_DELAY_BLOCKS;
+    if (source_sequence == last_processed_input_block)
+        return;
+
+    uint32_t destination_block = output_active_block ^ 1u;
+    if (output_ready[destination_block])
+        return;
+
+    uint32_t source_block = source_sequence % INPUT_BUFFER_BLOCKS;
+    memcpy(output_buffer[destination_block], input_buffer[source_block],
+           sizeof(output_buffer[destination_block]));
+    output_ready[destination_block] = true;
+    last_processed_input_block = source_sequence;
+}
+
+void audio_loopback_start(void)
+{
+    if (loopback_running)
+        return;
+
+    memset(input_buffer, 0, sizeof(input_buffer));
+    memset(output_buffer, 0, sizeof(output_buffer));
+
+    mclk_pio_init();
+    din_pio_init();
+    dout_pio_init();
+
+    loopback_rx_dma = dma_claim_unused_channel(true);
+    loopback_tx_dma = dma_claim_unused_channel(true);
+    input_dma_block = 0;
+    input_completed_blocks = 0;
+    output_active_block = 0;
+    output_ready[0] = false;
+    output_ready[1] = false;
+    last_processed_input_block = UINT32_MAX;
+
+    dma_channel_config rx_config = dma_channel_get_default_config(loopback_rx_dma);
+    channel_config_set_transfer_data_size(&rx_config, DMA_SIZE_32);
+    channel_config_set_read_increment(&rx_config, false);
+    channel_config_set_write_increment(&rx_config, true);
+    channel_config_set_dreq(&rx_config,
+                            pio_get_dreq(pico_audio.pio_1, pico_audio.sm_din, false));
+    dma_channel_configure(loopback_rx_dma, &rx_config,
+                          input_buffer[input_dma_block],
+                          &pico_audio.pio_1->rxf[pico_audio.sm_din],
+                          AUDIO_BLOCK_FRAMES, false);
+
+    dma_channel_config tx_config = dma_channel_get_default_config(loopback_tx_dma);
+    channel_config_set_transfer_data_size(&tx_config, DMA_SIZE_32);
+    channel_config_set_read_increment(&tx_config, true);
+    channel_config_set_write_increment(&tx_config, false);
+    channel_config_set_dreq(&tx_config,
+                            pio_get_dreq(pico_audio.pio_2, pico_audio.sm_dout, true));
+    dma_channel_configure(loopback_tx_dma, &tx_config,
+                          &pico_audio.pio_2->txf[pico_audio.sm_dout],
+                          output_buffer[output_active_block],
+                          AUDIO_BLOCK_FRAMES, false);
+
+    irq_set_exclusive_handler(DMA_IRQ_1, loopback_dma_handler);
+    dma_channel_set_irq1_enabled(loopback_rx_dma, true);
+    dma_channel_set_irq1_enabled(loopback_tx_dma, true);
+    irq_set_enabled(DMA_IRQ_1, true);
+
+    loopback_running = true;
+    dma_start_channel_mask((1u << loopback_rx_dma) | (1u << loopback_tx_dma));
+}
 
 /******************************************************************************
 function: Recording and playback loopback test
 ******************************************************************************/	
 void Loopback_test()
 {
-    //static int32_t *mic_sample_buffers;
-    //static int mic_num_samples = 120000;
-    static int mic_num_samples = sizeof(mic_sample_buffers) / sizeof(mic_sample_buffers[0]);
-
-    //mic_sample_buffers = malloc(mic_num_samples * sizeof(int32_t));
-    //memset(mic_sample_buffers, 0, mic_num_samples * sizeof(int32_t)); 
-
-    if (!init_flag)
-    {
-        //MCLK
-        mclk_pio_init();
-        //READ
-        din_pio_init();
-        //WRITE
-        dout_pio_init();
-        pio_sm_set_enabled(pico_audio.pio_2, pico_audio.sm_dout, false);
-        init_flag = 1;
-    }
-
-    //while (true) 
-    {	
-        //READ
-        pio_sm_set_enabled(pico_audio.pio_1, pico_audio.sm_din, true);
-        for (int i = 0; i < mic_num_samples; i ++)
-            mic_sample_buffers[i] = pio_sm_get_blocking(pico_audio.pio_1, pico_audio.sm_din);
-        pio_sm_set_enabled(pico_audio.pio_1, pico_audio.sm_din, false);
-
-        //WRITE
-        pio_sm_set_enabled(pico_audio.pio_2, pico_audio.sm_dout, true);
-        for(int i = 0; i < mic_num_samples; i++)
-            pio_sm_put_blocking(pico_audio.pio_2, pico_audio.sm_dout, mic_sample_buffers[i]);
-        pio_sm_set_enabled(pico_audio.pio_2, pico_audio.sm_dout, false);
-    }
+    audio_loopback_start();
 }
