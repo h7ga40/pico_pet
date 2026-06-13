@@ -24,6 +24,20 @@ pet_state_t working_state = 0;
 
 UWORD BlackImage[AMOLED_1IN8_HEIGHT*AMOLED_1IN8_WIDTH];
 
+static const uint16_t pet_frame_intervals_ms[PET_IMAGE_STATE_COUNT] = {
+    [PET_STATE_IDLE] = 1000,
+    [PET_STATE_RUNNING_RIGHT] = 100,
+    [PET_STATE_RUNNING_LEFT] = 100,
+    [PET_STATE_WAVING] = 100,
+    [PET_STATE_JUMPING] = 100,
+    [PET_STATE_FAILED] = 100,
+    [PET_STATE_WAITING] = 100,
+    [PET_STATE_RUNNING] = 100,
+    [PET_STATE_REVIEW] = 100,
+};
+static const int16_t pet_image_offset_x = 0;
+static const int16_t pet_image_offset_y = 0;
+
 void Touch_INT_callback(uint gpio, uint32_t events);
 
 static uint32_t tts_random_state;
@@ -150,9 +164,10 @@ int main()
     pet_state_t state = PET_STATE_IDLE;
     working_state = PET_STATE_IDLE;
     int frame = 0;
-    int frame_count = pet_state_frame_counts[0];
+    int frame_count = pet_state_frame_counts[state];
     bool tts_was_busy = false;
     absolute_time_t next_audio_process = make_timeout_time_ms(20);
+    absolute_time_t next_state_update = get_absolute_time();
     absolute_time_t next_frame_update = get_absolute_time();
     while(1)
     {
@@ -243,12 +258,6 @@ int main()
             next_audio_process = make_timeout_time_ms(20);
         }
 
-        if (!time_reached(next_frame_update)) {
-            sleep_ms(1);
-            continue;
-        }
-        next_frame_update = make_timeout_time_ms(100);
-
         if (flag_click) {
             flag_click = 0;
             state = PET_STATE_JUMPING;
@@ -257,7 +266,8 @@ int main()
             flag_dclick = 0;
             state = PET_STATE_WAVING;
         }
-        else if (state == working_state) {
+        else if (state == working_state && time_reached(next_state_update)) {
+            next_state_update = make_timeout_time_ms(100);
             while(i2c_lock);
             I2C_LOCK();
             QMI8658_read_xyz(acc, gyro, &tim_count);
@@ -278,8 +288,19 @@ int main()
             PIC = pet_state_frames[state];
             frame = 0;
             frame_count = pet_state_frame_counts[state];
+            next_frame_update = get_absolute_time();
         }
-        Paint_DrawImage(PIC[frame].data, (AMOLED_1IN8.WIDTH - PET_IMAGE_WIDTH) / 2, (AMOLED_1IN8.HEIGHT - PET_IMAGE_HEIGHT) / 2, PET_IMAGE_WIDTH, PET_IMAGE_HEIGHT);
+
+        if (!time_reached(next_frame_update)) {
+            sleep_ms(1);
+            continue;
+        }
+        next_frame_update = make_timeout_time_ms(pet_frame_intervals_ms[state]);
+
+        Paint_DrawImage(PIC[frame].data,
+                        (AMOLED_1IN8.WIDTH - PET_IMAGE_WIDTH) / 2 + pet_image_offset_x,
+                        (AMOLED_1IN8.HEIGHT - PET_IMAGE_HEIGHT) / 2 + pet_image_offset_y,
+                        PET_IMAGE_WIDTH, PET_IMAGE_HEIGHT);
         AMOLED_1IN8_Display(BlackImage);
         frame++;
         if (frame >= frame_count) {
