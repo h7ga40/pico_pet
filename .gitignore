@@ -23,6 +23,7 @@ _ref/
 .venv/
 .vscode/
 build/
+docs/
 pets/**
 !pets/CMakeLists.txt
 samples/**
