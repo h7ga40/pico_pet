@@ -1,5 +1,10 @@
 # OpenJTalk integration handoff
 
+> Update: the direct synthesis issue was fixed in OpenJTalk commit `108159c`.
+> PetApp now uses the stable long-option interface described in
+> `docs/openjtalk_fix_update.md`. The raw path below remains as investigation
+> history and as a reference for bounded RP2350 streaming.
+
 ## Purpose
 
 PetApp currently uses pre-generated WAV files as a temporary TTS implementation.

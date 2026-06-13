@@ -96,7 +96,22 @@ python scripts\export_kws_dense.py models\kws_tiny\model_int8.tflite
 ## 音声再生
 
 `tts/input.txt`の空行とコメント以外の各行から、16 kHz、16-bit、モノラルWAVを
-1つずつ生成します。Open JTalkを用意したPCで次を実行してください。
+1つずつ生成します。Windows x64版`OpenJTalk.exe`は`tools/openjtalk`に同梱しています。
+辞書とHTS音声は別配布物のため、別途用意して次を実行してください。
+
+- 辞書: [Open JTalk - SourceForge](https://sourceforge.net/projects/open-jtalk/)の
+  `open_jtalk_dic_utf_8-1.11.tar.gz`
+- Mei音声: [MMDAgent - SourceForge](https://sourceforge.net/projects/mmdagent/)の
+  `MMDAgent_Example-1.8.zip`に含まれる`mei_normal.htsvoice`
+
+ダウンロードしたファイルを展開し、リポジトリ内の次の場所へ配置してください。
+
+```text
+tools\openjtalk\open_jtalk_dic_utf_8-1.11\
+tools\openjtalk\mei\mei_normal.htsvoice
+```
+
+異なる場所へ展開した場合は、`--dic`と`--voice`で指定してください。
 
 ```powershell
 python scripts\generate_tts_wavs.py

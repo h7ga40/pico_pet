@@ -26,21 +26,18 @@ def validate_wav(path: Path) -> None:
 
 
 def main() -> None:
-    default_root = Path.home() / "Documents" / "OpenJTalk" / "x64" / "Debug"
-    default_project = Path.home() / "Documents" / "OpenJTalk"
-    default_data = default_project / "OpenJTalk"
+    repo_root = Path(__file__).resolve().parents[1]
+    default_data = repo_root / "tools" / "openjtalk"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=Path, default=Path("tts/input.txt"))
     parser.add_argument("--output-dir", type=Path, default=Path("tts/generated"))
-    parser.add_argument("--open-jtalk", type=Path, default=default_root / "OpenJTalk.exe")
-    parser.add_argument("--hts-engine", type=Path, default=default_root / "hts_engine_cli.exe")
-    parser.add_argument("--raw-engine", type=Path, default=default_root / "hts_engine_raw_cli.exe")
+    parser.add_argument("--open-jtalk", type=Path, default=repo_root / "tools" / "openjtalk" / "OpenJTalk.exe")
     parser.add_argument("--dic", type=Path, default=default_data / "open_jtalk_dic_utf_8-1.11")
     parser.add_argument("--voice", type=Path, default=default_data / "mei" / "mei_normal.htsvoice")
     args = parser.parse_args()
 
-    for path in (args.open_jtalk, args.hts_engine, args.raw_engine, args.voice, args.dic, args.input):
+    for path in (args.open_jtalk, args.voice, args.dic, args.input):
         if not path.exists():
             raise RuntimeError(f"Missing required path: {path}")
 
@@ -49,17 +46,6 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory() as temp_name:
         temp_dir = Path(temp_name)
-        raw_voice = temp_dir / "voice_16k.raw"
-        subprocess.run(
-            [
-                str(args.hts_engine),
-                "export-voice",
-                "--voice", str(args.voice),
-                "--output", str(raw_voice),
-                "--tts-16khz",
-            ],
-            check=True,
-        )
         generated: list[Path] = []
         for index, phrase in enumerate(phrases):
             text_path = temp_dir / f"phrase_{index:03d}.txt"
@@ -68,12 +54,11 @@ def main() -> None:
             subprocess.run(
                 [
                     str(args.open_jtalk),
-                    "-x", str(args.dic),
-                    "-raw", str(raw_voice),
-                    "-raw-engine", str(args.raw_engine),
-                    "-raw-block-frames", "256",
-                    "-ow", str(wav_path),
-                    str(text_path),
+                    "--dic", str(args.dic),
+                    "--voice", str(args.voice),
+                    "--sample-rate", "16000",
+                    "--input", str(text_path),
+                    "--output", str(wav_path),
                 ],
                 check=True,
             )
