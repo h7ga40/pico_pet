@@ -126,7 +126,8 @@ void mclk_pio_init()
 }
 
 #define AUDIO_BLOCK_FRAMES       (PICO_SAMPLE_FREQ / 50)
-#define INPUT_BUFFER_BLOCKS      50
+// Keep enough input history to cover one AMOLED refresh without reserving 1 s of SRAM.
+#define INPUT_BUFFER_BLOCKS      8
 #define OUTPUT_BUFFER_BLOCKS     2
 
 static int32_t input_buffer[INPUT_BUFFER_BLOCKS][AUDIO_BLOCK_FRAMES];
