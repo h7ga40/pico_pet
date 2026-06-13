@@ -7,7 +7,7 @@
 #include "build/pets/zundamon/generated/pet_images.h"
 #include "GUI_Paint.h"
 #include "wakeword.h"
-#include "tts_test_pcm.h"
+#include "tts_phrase_pcm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +25,30 @@ pet_state_t working_state = 0;
 UWORD BlackImage[AMOLED_1IN8_HEIGHT*AMOLED_1IN8_WIDTH];
 
 void Touch_INT_callback(uint gpio, uint32_t events);
+
+static uint32_t tts_random_state;
+
+static bool play_random_tts(void)
+{
+    if (g_tts_pcm_phrase_count == 0 || audio_playback_is_busy())
+        return false;
+
+    if (tts_random_state == 0)
+        tts_random_state = time_us_32() | 1u;
+    tts_random_state ^= tts_random_state << 13;
+    tts_random_state ^= tts_random_state >> 17;
+    tts_random_state ^= tts_random_state << 5;
+
+    size_t index = tts_random_state % g_tts_pcm_phrase_count;
+    const tts_pcm_phrase_t *phrase = &g_tts_pcm_phrases[index];
+    if (!audio_play_pcm16_start(phrase->samples, phrase->sample_count))
+        return false;
+
+    wakeword_set_debug_enabled(false);
+    printf("TTS PCM playback: phrase=%u samples=%u at 16000 Hz\n",
+           (unsigned)index, (unsigned)phrase->sample_count);
+    return true;
+}
 
 static void stream_pcm_data(uint32_t seconds)
 {
@@ -181,11 +205,7 @@ int main()
                             seconds = 10;
                         stream_pcm_data(seconds);
                     } else if (strcmp(linebuf, "tts") == 0) {
-                        if (audio_play_pcm16_start(g_tts_test_pcm,
-                                                   g_tts_test_pcm_sample_count)) {
-                            printf("TTS PCM playback: %u samples at 16000 Hz\n",
-                                   (unsigned)g_tts_test_pcm_sample_count);
-                            wakeword_set_debug_enabled(false);
+                        if (play_random_tts()) {
                             tts_was_busy = true;
                         } else {
                             printf("TTS playback busy\n");
@@ -214,8 +234,11 @@ int main()
             while ((wakeword_sample_count = audio_input_read_next(
                         wakeword_samples, PICO_SAMPLE_FREQ / 50)) > 0) {
                 if (!audio_playback_is_busy() && !tts_was_busy &&
-                    wakeword_process_frame(wakeword_samples, wakeword_sample_count))
+                    wakeword_process_frame(wakeword_samples, wakeword_sample_count)) {
                     printf("Wakeword event detected\n");
+                    if (play_random_tts())
+                        tts_was_busy = true;
+                }
             }
             next_audio_process = make_timeout_time_ms(20);
         }

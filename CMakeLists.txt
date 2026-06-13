@@ -7,18 +7,27 @@ endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-set(TTS_PCM_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/generated/tts_test_pcm.c)
-set(TTS_PCM_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/tts_test_pcm.h)
+file(GLOB TTS_WAV_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_LIST_DIR}/tts/generated/phrase_*.wav)
+if(NOT TTS_WAV_FILES)
+    message(FATAL_ERROR "No TTS WAV files found. Run scripts/generate_tts_wavs.py first.")
+endif()
+list(SORT TTS_WAV_FILES)
+set(TTS_WAV_ARGS)
+foreach(TTS_WAV_FILE IN LISTS TTS_WAV_FILES)
+    list(APPEND TTS_WAV_ARGS --wav ${TTS_WAV_FILE})
+endforeach()
+set(TTS_PCM_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/generated/tts_phrase_pcm.c)
+set(TTS_PCM_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/tts_phrase_pcm.h)
 add_custom_command(
     OUTPUT ${TTS_PCM_SOURCE} ${TTS_PCM_HEADER}
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/scripts/generate_tts_pcm.py
-        --wav ${CMAKE_CURRENT_LIST_DIR}/tts/test_phrase_16k.wav
+        ${TTS_WAV_ARGS}
         --source ${TTS_PCM_SOURCE}
         --header ${TTS_PCM_HEADER}
     DEPENDS
         ${CMAKE_CURRENT_LIST_DIR}/scripts/generate_tts_pcm.py
-        ${CMAKE_CURRENT_LIST_DIR}/tts/test_phrase_16k.wav
-    COMMENT "Generating 16 kHz TTS PCM data"
+        ${TTS_WAV_FILES}
+    COMMENT "Generating embedded 16 kHz TTS phrase table"
     VERBATIM
 )
 set(sdkVersion 2.2.0)

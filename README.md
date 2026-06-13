@@ -95,9 +95,16 @@ python scripts\export_kws_dense.py models\kws_tiny\model_int8.tflite
 
 ## 音声再生
 
-`tts/test_phrase_16k.wav`は16 kHz、16-bit、モノラルWAVにしてください。
-ビルド時に`generate_tts_pcm.py`でファームウェア用PCMへ変換されます。
-シリアルから`tts`を入力すると、アニメーションを止めずに再生します。
+`tts/input.txt`の空行とコメント以外の各行から、16 kHz、16-bit、モノラルWAVを
+1つずつ生成します。Open JTalkを用意したPCで次を実行してください。
+
+```powershell
+python scripts\generate_tts_wavs.py
+```
+
+生成された`tts/generated/phrase_*.wav`は、ビルド時に`generate_tts_pcm.py`で
+ファームウェア用PCMテーブルへ変換されます。ウェイクワード検出時とシリアルの
+`tts`コマンド実行時に、いずれか1つをランダムに選び、アニメーションを止めずに再生します。
 
 ## scripts
 
@@ -111,3 +118,4 @@ python scripts\export_kws_dense.py models\kws_tiny\model_int8.tflite
 - `predict_kws_tiny.py`: 学習済みモデルの評価
 - `export_kws_dense.py`: モデル重みのC変換
 - `generate_tts_pcm.py`: 16 kHz WAVのC PCM変換
+- `generate_tts_wavs.py`: `input.txt`からOpen JTalk WAVを一括生成
