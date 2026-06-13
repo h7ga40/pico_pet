@@ -1,9 +1,0 @@
-{
-  "sample_rate": 16000,
-  "clip_seconds": 2,
-  "sample_count": 32000,
-  "window_size": 320,
-  "window_step": 320,
-  "features_per_window": 2,
-  "feature_size": 200
-}

@@ -11,6 +11,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "pico/stdio.h"
+#include "pico/stdio_uart.h"
 #include "pico/stdlib.h"
 
 pet_image_t const *PIC;
@@ -34,6 +36,7 @@ static void stream_pcm_data(uint32_t seconds)
     wakeword_set_debug_enabled(false);
     printf("PCM16 %lu %u\n", (unsigned long)sample_count, PICO_SAMPLE_FREQ);
     sleep_ms(100);
+    stdio_set_driver_enabled(&stdio_uart, false);
 
     while (sent < sample_count) {
         size_t count = audio_input_read_next(samples, PICO_SAMPLE_FREQ / 50);
@@ -53,6 +56,8 @@ static void stream_pcm_data(uint32_t seconds)
     }
 
     printf("\nENDPCM\n");
+    stdio_flush();
+    stdio_set_driver_enabled(&stdio_uart, true);
     wakeword_init();
 }
 

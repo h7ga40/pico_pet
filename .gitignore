@@ -27,6 +27,7 @@ pets/**
 !pets/CMakeLists.txt
 samples/**
 !samples/CMakeLists.txt
+models/
 __pycache__/
 *.pyc
 *.keras

@@ -14,6 +14,11 @@ import tensorflow as tf
 
 
 LABELS = ("negative", "near_miss", "positive")
+LABEL_DIRECTORIES = {
+    "negative": ("negative", "noise"),
+    "near_miss": ("near_miss",),
+    "positive": ("positive",),
+}
 SAMPLE_RATE = 16000
 CLIP_SECONDS = 2
 SAMPLE_COUNT = SAMPLE_RATE * CLIP_SECONDS
@@ -66,9 +71,10 @@ def extract_features(audio: np.ndarray) -> np.ndarray:
 def list_samples(samples_dir: Path) -> list[Sample]:
     samples: list[Sample] = []
     for label_index, label in enumerate(LABELS):
-        label_dir = samples_dir / label
-        for wav_path in sorted(label_dir.glob("*.wav")):
-            samples.append(Sample(wav_path, label_index))
+        for directory in LABEL_DIRECTORIES[label]:
+            label_dir = samples_dir / directory
+            for wav_path in sorted(label_dir.glob("*.wav")):
+                samples.append(Sample(wav_path, label_index))
     return samples
 
 
@@ -93,6 +99,17 @@ def make_arrays(samples: list[Sample]) -> tuple[np.ndarray, np.ndarray]:
     x = np.stack([extract_features(load_wav(sample.path)) for sample in samples])
     y = np.array([sample.label_index for sample in samples], dtype=np.int64)
     return x, y
+
+
+def balanced_class_weights(labels: np.ndarray) -> dict[int, float]:
+    counts = np.bincount(labels, minlength=len(LABELS))
+    if np.any(counts == 0):
+        missing = [LABELS[index] for index, count in enumerate(counts) if count == 0]
+        raise RuntimeError(f"Training samples missing for: {', '.join(missing)}")
+    return {
+        index: float(len(labels) / (len(LABELS) * count))
+        for index, count in enumerate(counts)
+    }
 
 
 def build_model(input_size: int) -> tf.keras.Model:
@@ -143,11 +160,19 @@ def main() -> None:
     train_samples, validation_samples = split_samples(samples, args.validation_ratio, args.seed)
     x_train, y_train = make_arrays(train_samples)
     x_validation, y_validation = make_arrays(validation_samples)
+    class_weights = balanced_class_weights(y_train)
 
     print(f"feature_size={x_train.shape[1]}")
+    for directory in LABEL_DIRECTORIES["negative"]:
+        count = sum(1 for sample in samples if sample.path.parent.name == directory)
+        print(f"source {directory}: {count}")
     for label in LABELS:
         count = sum(1 for sample in samples if LABELS[sample.label_index] == label)
         print(f"{label}: {count}")
+    print(
+        "class_weights: "
+        + " ".join(f"{LABELS[index]}={weight:.3f}" for index, weight in class_weights.items())
+    )
 
     model = build_model(x_train.shape[1])
     history = model.fit(
@@ -156,6 +181,7 @@ def main() -> None:
         validation_data=(x_validation, y_validation),
         epochs=args.epochs,
         batch_size=args.batch_size,
+        class_weight=class_weights,
         callbacks=[tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True)],
     )
     loss, accuracy = model.evaluate(x_validation, y_validation, verbose=0)

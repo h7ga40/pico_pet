@@ -7,7 +7,8 @@ import sys
 from pathlib import Path
 
 
-VALID_LABELS = ("positive", "negative", "near_miss")
+VALID_LABELS = ("positive", "negative", "near_miss", "noise")
+SAMPLE_INDEX_WIDTH = 5
 
 
 def next_sample_path(root: Path, label: str, prefix: str) -> Path:
@@ -16,7 +17,7 @@ def next_sample_path(root: Path, label: str, prefix: str) -> Path:
 
     existing = sorted(label_dir.glob(f"{prefix}_*.wav"))
     if not existing:
-        return label_dir / f"{prefix}_001.wav"
+        return label_dir / f"{prefix}_{1:0{SAMPLE_INDEX_WIDTH}d}.wav"
 
     max_index = 0
     for path in existing:
@@ -26,7 +27,7 @@ def next_sample_path(root: Path, label: str, prefix: str) -> Path:
         except (IndexError, ValueError):
             continue
 
-    return label_dir / f"{prefix}_{max_index + 1:03d}.wav"
+    return label_dir / f"{prefix}_{max_index + 1:0{SAMPLE_INDEX_WIDTH}d}.wav"
 
 
 def main() -> None:
