@@ -99,12 +99,85 @@ static void stream_pcm_data(uint32_t seconds)
     wakeword_init();
 }
 
+bool tts_was_busy = false;
+
+static void process_command(const char *linebuf)
+{
+    if (strcmp(linebuf, "idle") == 0) {
+        working_state = PET_STATE_IDLE;
+    } else if (strcmp(linebuf, "failed") == 0) {
+        working_state = PET_STATE_FAILED;
+    } else if (strcmp(linebuf, "waiting") == 0) {
+        working_state = PET_STATE_WAITING;
+    } else if (strcmp(linebuf, "running") == 0) {
+        working_state = PET_STATE_RUNNING;
+    } else if (strcmp(linebuf, "review") == 0) {
+        working_state = PET_STATE_REVIEW;
+    } else if (strcmp(linebuf, "mic") == 0) {
+        int16_t samples[PICO_SAMPLE_FREQ / 50];
+        size_t sample_count = audio_input_copy_latest(samples, PICO_SAMPLE_FREQ / 50);
+        int32_t peak = 0;
+        int64_t sum_squares = 0;
+        for (size_t i = 0; i < sample_count; ++i) {
+            int32_t sample = samples[i];
+            int32_t magnitude = sample < 0 ? -sample : sample;
+            if (magnitude > peak)
+                peak = magnitude;
+            sum_squares += (int64_t)sample * sample;
+        }
+        if (sample_count == 0) {
+            printf("Mic: no new samples\n");
+        } else {
+            printf("Mic: samples=%u peak=%ld mean_square=%lld\n",
+                    (unsigned)sample_count,
+                    (long)peak,
+                    sum_squares / (int64_t)sample_count);
+        }
+    } else if (strncmp(linebuf, "record ", 7) == 0) {
+        uint32_t seconds = (uint32_t)strtoul(linebuf + 7, NULL, 10);
+        if (seconds == 0)
+            seconds = 1;
+        else if (seconds > 10)
+            seconds = 10;
+        stream_pcm_data(seconds);
+    } else if (strcmp(linebuf, "tts") == 0) {
+        if (play_random_tts()) {
+            tts_was_busy = true;
+        } else {
+            printf("TTS playback busy\n");
+        }
+    } else {
+        printf("Unknown command: %s\n", linebuf);
+    }
+}
+
+static void poll_serial_commands(void)
+{
+    static char linebuf[128];
+    static int linepos = 0;
+
+    while(1) {
+        int c = getchar_timeout_us(0);
+        if (c == PICO_ERROR_TIMEOUT || c == PICO_ERROR_NO_DATA)
+            break;
+        putchar(c); // エコーバック
+        if (c == '\r' || c == '\n') {
+            if (c == '\r')
+                putchar('\n');
+            if (linepos > 0) {
+                linebuf[linepos] = '\0';
+                process_command(linebuf);
+                linepos = 0;
+            }
+        } else if (linepos < (int)sizeof(linebuf) - 1) {
+            linebuf[linepos++] = (char)c;
+        }
+    }
+}
+
 int main() 
 {
     stdio_init_all();
-
-    char linebuf[128];
-    int linepos = 0;
 
     if(DEV_Module_Init()!=0){
         return -1;
@@ -165,75 +238,12 @@ int main()
     working_state = PET_STATE_IDLE;
     int frame = 0;
     int frame_count = pet_state_frame_counts[state];
-    bool tts_was_busy = false;
     absolute_time_t next_audio_process = make_timeout_time_ms(20);
     absolute_time_t next_state_update = get_absolute_time();
     absolute_time_t next_frame_update = get_absolute_time();
     while(1)
     {
-        while(1) {
-            int c = getchar_timeout_us(0);
-            if (c == PICO_ERROR_TIMEOUT || c == PICO_ERROR_NO_DATA)
-                break;
-            putchar(c); // エコーバック
-            if (c == '\r' || c == '\n') {
-                if (c == '\r')
-                    putchar('\n');
-                if (linepos > 0) {
-                    linebuf[linepos] = '\0';
-                    // ここでコマンド処理
-                    if (strcmp(linebuf, "idle") == 0) {
-                        working_state = PET_STATE_IDLE;
-                    } else if (strcmp(linebuf, "failed") == 0) {
-                        working_state = PET_STATE_FAILED;
-                    } else if (strcmp(linebuf, "waiting") == 0) {
-                        working_state = PET_STATE_WAITING;
-                    } else if (strcmp(linebuf, "running") == 0) {
-                        working_state = PET_STATE_RUNNING;
-                    } else if (strcmp(linebuf, "review") == 0) {
-                        working_state = PET_STATE_REVIEW;
-                    } else if (strcmp(linebuf, "mic") == 0) {
-                        int16_t samples[PICO_SAMPLE_FREQ / 50];
-                        size_t sample_count = audio_input_copy_latest(samples, PICO_SAMPLE_FREQ / 50);
-                        int32_t peak = 0;
-                        int64_t sum_squares = 0;
-                        for (size_t i = 0; i < sample_count; ++i) {
-                            int32_t sample = samples[i];
-                            int32_t magnitude = sample < 0 ? -sample : sample;
-                            if (magnitude > peak)
-                                peak = magnitude;
-                            sum_squares += (int64_t)sample * sample;
-                        }
-                        if (sample_count == 0) {
-                            printf("Mic: no new samples\n");
-                        } else {
-                            printf("Mic: samples=%u peak=%ld mean_square=%lld\n",
-                                   (unsigned)sample_count,
-                                   (long)peak,
-                                   sum_squares / (int64_t)sample_count);
-                        }
-                    } else if (strncmp(linebuf, "record ", 7) == 0) {
-                        uint32_t seconds = (uint32_t)strtoul(linebuf + 7, NULL, 10);
-                        if (seconds == 0)
-                            seconds = 1;
-                        else if (seconds > 10)
-                            seconds = 10;
-                        stream_pcm_data(seconds);
-                    } else if (strcmp(linebuf, "tts") == 0) {
-                        if (play_random_tts()) {
-                            tts_was_busy = true;
-                        } else {
-                            printf("TTS playback busy\n");
-                        }
-                    } else {
-                        printf("Unknown command: %s\n", linebuf);
-                    }
-                    linepos = 0;
-                }
-            } else if (linepos < (int)sizeof(linebuf) - 1) {
-                linebuf[linepos++] = (char)c;
-            }
-        }
+        poll_serial_commands();
 
         if (time_reached(next_audio_process)) {
             int16_t wakeword_samples[PICO_SAMPLE_FREQ / 50];
