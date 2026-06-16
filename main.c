@@ -242,6 +242,7 @@ int main()
             } else if (tts_was_busy) {
                 tts_was_busy = false;
                 wakeword_set_debug_enabled(true);
+                state = working_state;
                 printf("TTS playback complete\n");
             }
 
@@ -258,7 +259,10 @@ int main()
             next_audio_process = make_timeout_time_ms(20);
         }
 
-        if (flag_click) {
+        if (audio_playback_is_busy() || tts_was_busy) {
+            state = PET_STATE_WAVING;
+        }
+        else if (flag_click) {
             flag_click = 0;
             state = PET_STATE_JUMPING;
         }
@@ -304,7 +308,7 @@ int main()
         AMOLED_1IN8_Display(BlackImage);
         frame++;
         if (frame >= frame_count) {
-            state = working_state;
+            state = (audio_playback_is_busy() || tts_was_busy) ? PET_STATE_WAVING : working_state;
             frame = 0;
             frame_count = pet_state_frame_counts[state];
         }
