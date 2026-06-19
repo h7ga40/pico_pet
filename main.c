@@ -208,13 +208,6 @@ int main()
     printf("1.8inch AMOLED initializing...\r\n");
     AMOLED_1IN8_Init();
     AMOLED_1IN8_SetBrightness(100);
-    
-    // UDOUBLE Imagesize = AMOLED_1IN8_HEIGHT*AMOLED_1IN8_WIDTH*2;
-    // UWORD *BlackImage;
-    // if((BlackImage = (UWORD *)malloc(Imagesize)) == NULL) {
-    //     printf("Failed to apply for black memory...\r\n");
-    //     exit(0);
-    // }
 
     /* Create a new image cache named IMAGE_RGB and fill it with white*/
     Paint_NewImage((UBYTE *)BlackImage, AMOLED_1IN8.WIDTH, AMOLED_1IN8.HEIGHT, 0, WHITE);
