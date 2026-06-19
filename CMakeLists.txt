@@ -7,9 +7,16 @@ endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-file(GLOB TTS_WAV_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_LIST_DIR}/tts/generated/phrase_*.wav)
+file(GLOB TTS_USER_WAV_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_LIST_DIR}/tts/user/*.wav)
+if(TTS_USER_WAV_FILES)
+    set(TTS_WAV_FILES ${TTS_USER_WAV_FILES})
+    set(TTS_WAV_SOURCE_DESCRIPTION "user WAV files")
+else()
+    file(GLOB TTS_WAV_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_LIST_DIR}/tts/generated/phrase_*.wav)
+    set(TTS_WAV_SOURCE_DESCRIPTION "generated OpenJTalk WAV files")
+endif()
 if(NOT TTS_WAV_FILES)
-    message(FATAL_ERROR "No TTS WAV files found. Run scripts/generate_tts_wavs.py first.")
+    message(FATAL_ERROR "No TTS WAV files found. Add WAV files to tts/user or run scripts/generate_tts_wavs.py first.")
 endif()
 list(SORT TTS_WAV_FILES)
 set(TTS_WAV_ARGS)
@@ -18,16 +25,18 @@ foreach(TTS_WAV_FILE IN LISTS TTS_WAV_FILES)
 endforeach()
 set(TTS_PCM_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/generated/tts_phrase_pcm.c)
 set(TTS_PCM_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/tts_phrase_pcm.h)
+set(TTS_NORMALIZED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated/tts_normalized)
 add_custom_command(
     OUTPUT ${TTS_PCM_SOURCE} ${TTS_PCM_HEADER}
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/scripts/generate_tts_pcm.py
         ${TTS_WAV_ARGS}
         --source ${TTS_PCM_SOURCE}
         --header ${TTS_PCM_HEADER}
+        --normalized-dir ${TTS_NORMALIZED_DIR}
     DEPENDS
         ${CMAKE_CURRENT_LIST_DIR}/scripts/generate_tts_pcm.py
         ${TTS_WAV_FILES}
-    COMMENT "Generating embedded 16 kHz TTS phrase table"
+    COMMENT "Generating embedded 16 kHz TTS phrase table from ${TTS_WAV_SOURCE_DESCRIPTION}"
     VERBATIM
 )
 set(sdkVersion 2.2.0)

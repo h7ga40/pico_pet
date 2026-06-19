@@ -104,8 +104,15 @@ python scripts\export_kws_dense.py models\kws_tiny\model_int8.tflite
 
 ## 音声再生
 
-`tts/input.txt`の空行とコメント以外の各行から、16 kHz、16-bit、モノラルWAVを
-1つずつ生成します。Windows x64版`OpenJTalk.exe`は`tools/openjtalk`に同梱しています。
+自分で用意したWAVを使う場合は、`tts/user`へ配置してください。
+`tts/user/*.wav`が1つ以上ある場合は、TTSで生成したWAVより優先して使用します。
+複数ファイルに対応しており、ウェイクワード検出時と`tts`コマンド実行時にランダム再生されます。
+
+WAVはビルド時に16 kHz、16-bit、モノラルへ変換してからファームウェアへ埋め込みます。
+元のWAVファイルは変更しません。変換後の確認用WAVは`build/generated/tts_normalized`へ出力されます。
+
+ユーザーWAVがない場合は、`tts/input.txt`の空行とコメント以外の各行から、16 kHz、16-bit、モノラルWAVを
+1つずつ生成して使います。Windows x64版`OpenJTalk.exe`は`tools/openjtalk`に同梱しています。
 辞書とHTS音声は別配布物のため、別途用意して次を実行してください。
 
 - 辞書: [Open JTalk - SourceForge](https://sourceforge.net/projects/open-jtalk/)の

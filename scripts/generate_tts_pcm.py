@@ -7,6 +7,11 @@ import wave
 from pathlib import Path
 
 
+TARGET_SAMPLE_RATE = 16000
+TARGET_SAMPLE_WIDTH = 2
+TARGET_CHANNELS = 1
+
+
 def c_samples(data: bytes, columns: int = 12) -> str:
     samples = struct.unpack(f"<{len(data) // 2}h", data)
     lines = []
@@ -16,22 +21,99 @@ def c_samples(data: bytes, columns: int = 12) -> str:
     return "\n".join(lines)
 
 
+def decode_pcm(pcm: bytes, sample_width: int) -> list[int]:
+    if sample_width == 1:
+        return [(value - 128) << 8 for value in pcm]
+    if sample_width == 2:
+        return list(struct.unpack(f"<{len(pcm) // 2}h", pcm))
+    if sample_width == 3:
+        samples = []
+        for offset in range(0, len(pcm), 3):
+            value = pcm[offset] | (pcm[offset + 1] << 8) | (pcm[offset + 2] << 16)
+            if value & 0x800000:
+                value -= 0x1000000
+            samples.append(max(-32768, min(32767, value >> 8)))
+        return samples
+    if sample_width == 4:
+        values = struct.unpack(f"<{len(pcm) // 4}i", pcm)
+        return [max(-32768, min(32767, value >> 16)) for value in values]
+    raise RuntimeError(f"unsupported sample width: {sample_width}")
+
+
+def mono_samples(samples: list[int], channels: int) -> list[int]:
+    if channels == 1:
+        return samples
+    output = []
+    for offset in range(0, len(samples), channels):
+        frame = samples[offset:offset + channels]
+        output.append(int(sum(frame) / len(frame)))
+    return output
+
+
+def resample_linear(samples: list[int], source_rate: int) -> list[int]:
+    if source_rate == TARGET_SAMPLE_RATE:
+        return samples
+    if not samples:
+        return []
+
+    output_length = max(1, round(len(samples) * TARGET_SAMPLE_RATE / source_rate))
+    output = []
+    for index in range(output_length):
+        source_position = index * source_rate / TARGET_SAMPLE_RATE
+        left = int(source_position)
+        right = min(left + 1, len(samples) - 1)
+        fraction = source_position - left
+        value = samples[left] * (1.0 - fraction) + samples[right] * fraction
+        output.append(int(round(max(-32768, min(32767, value)))))
+    return output
+
+
+def encode_pcm16(samples: list[int]) -> bytes:
+    return struct.pack(f"<{len(samples)}h", *samples)
+
+
+def wav_to_pcm16_mono_16k(path: Path) -> bytes:
+    with wave.open(str(path), "rb") as wav:
+        channels = wav.getnchannels()
+        sample_width = wav.getsampwidth()
+        sample_rate = wav.getframerate()
+        frame_count = wav.getnframes()
+        pcm = wav.readframes(frame_count)
+
+    if channels < 1:
+        raise RuntimeError(f"{path} has no audio channels")
+    if sample_width not in (1, 2, 3, 4):
+        raise RuntimeError(f"{path} has unsupported sample width: {sample_width}")
+
+    samples = decode_pcm(pcm, sample_width)
+    samples = mono_samples(samples, channels)
+    samples = resample_linear(samples, sample_rate)
+    return encode_pcm16(samples)
+
+
+def write_wav(path: Path, pcm: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(TARGET_CHANNELS)
+        wav.setsampwidth(TARGET_SAMPLE_WIDTH)
+        wav.setframerate(TARGET_SAMPLE_RATE)
+        wav.writeframes(pcm)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--wav", type=Path, action="append", required=True)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--header", type=Path, required=True)
+    parser.add_argument("--normalized-dir", type=Path)
     args = parser.parse_args()
 
     pcm_files: list[bytes] = []
-    for wav_path in args.wav:
-        with wave.open(str(wav_path), "rb") as wav:
-            sample_rate = wav.getframerate()
-            if wav.getnchannels() != 1 or wav.getsampwidth() != 2:
-                raise RuntimeError(f"{wav_path} must be 16-bit mono")
-            if sample_rate != 16000:
-                raise RuntimeError(f"{wav_path} must be 16 kHz, got {sample_rate} Hz")
-            pcm_files.append(wav.readframes(wav.getnframes()))
+    for index, wav_path in enumerate(args.wav):
+        pcm = wav_to_pcm16_mono_16k(wav_path)
+        pcm_files.append(pcm)
+        if args.normalized_dir is not None:
+            write_wav(args.normalized_dir / f"phrase_{index:03d}.wav", pcm)
 
     args.source.parent.mkdir(parents=True, exist_ok=True)
     args.header.parent.mkdir(parents=True, exist_ok=True)
