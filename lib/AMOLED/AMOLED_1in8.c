@@ -225,6 +225,29 @@ void AMOLED_1IN8_Display(UWORD *Image)
     QSPI_Deselect(qspi);             
 }
 
+void AMOLED_1IN8_DisplayPackedWindow(uint32_t Xstart, uint32_t Ystart,
+                                     uint32_t Width, uint32_t Height,
+                                     const UBYTE *Image)
+{
+    if (Xstart >= AMOLED_1IN8.WIDTH || Ystart >= AMOLED_1IN8.HEIGHT ||
+        Width == 0 || Height == 0)
+        return;
+
+    if (Width > AMOLED_1IN8.WIDTH - Xstart)
+        Width = AMOLED_1IN8.WIDTH - Xstart;
+    if (Height > AMOLED_1IN8.HEIGHT - Ystart)
+        Height = AMOLED_1IN8.HEIGHT - Ystart;
+
+    AMOLED_1IN8_SetWindows(Xstart, Ystart, Xstart + Width, Ystart + Height);
+    QSPI_Select(qspi);
+    QSPI_Pixel_Write(qspi, 0x2c);
+    channel_config_set_dreq(&c, pio_get_dreq(qspi.pio, qspi.sm, true));
+    dma_channel_configure(dma_tx, &c, &qspi.pio->txf[qspi.sm], Image,
+                          Width * Height * 2, true);
+    while (dma_channel_is_busy(dma_tx));
+    QSPI_Deselect(qspi);
+}
+
 /******************************************************************************
 function :	Send data to AMOLED to complete partial refresh
 parameter:

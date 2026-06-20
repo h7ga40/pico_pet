@@ -5,7 +5,6 @@
 #include "FT3168.h"
 #include "es8311.h"
 #include "build/pets/zundamon/generated/pet_images.h"
-#include "GUI_Paint.h"
 #include "wakeword.h"
 #include "tts_phrase_pcm.h"
 #include <stdio.h>
@@ -20,8 +19,6 @@ uint8_t i2c_lock = 0;
 pet_state_t working_state = 0;
 #define I2C_LOCK() i2c_lock = 1
 #define I2C_UNLOCK() i2c_lock = 0
-
-UWORD BlackImage[AMOLED_1IN8_HEIGHT*AMOLED_1IN8_WIDTH];
 
 static const uint16_t pet_frame_intervals_ms[PET_IMAGE_STATE_COUNT] = {
     [PET_STATE_IDLE] = 1000,
@@ -206,12 +203,8 @@ int main()
     AMOLED_1IN8_Init();
     AMOLED_1IN8_SetBrightness(100);
 
-    /* Create a new image cache named IMAGE_RGB and fill it with white*/
-    Paint_NewImage((UBYTE *)BlackImage, AMOLED_1IN8.WIDTH, AMOLED_1IN8.HEIGHT, 0, WHITE);
-    Paint_SetScale(65);
-    Paint_SetRotate(ROTATE_0);
-    Paint_Clear(BLACK);
-    AMOLED_1IN8_Display(BlackImage);
+    /* The AMOLED retains its own framebuffer, so no MCU framebuffer is needed. */
+    AMOLED_1IN8_Clear(0x0000);
 
     /* QMI8658 Init */
     float acc[3], gyro[3];
@@ -301,11 +294,12 @@ int main()
         }
         next_frame_update = make_timeout_time_ms(pet_frame_intervals_ms[state]);
 
-        Paint_DrawImage(PIC[frame].data,
-                        (AMOLED_1IN8.WIDTH - PET_IMAGE_WIDTH) / 2 + pet_image_offset_x,
-                        (AMOLED_1IN8.HEIGHT - PET_IMAGE_HEIGHT) / 2 + pet_image_offset_y,
-                        PET_IMAGE_WIDTH, PET_IMAGE_HEIGHT);
-        AMOLED_1IN8_Display(BlackImage);
+        AMOLED_1IN8_DisplayPackedWindow(
+            (AMOLED_1IN8.WIDTH - PET_IMAGE_WIDTH) / 2 + pet_image_offset_x,
+            (AMOLED_1IN8.HEIGHT - PET_IMAGE_HEIGHT) / 2 + pet_image_offset_y,
+            PET_IMAGE_WIDTH,
+            PET_IMAGE_HEIGHT,
+            PIC[frame].data);
         frame++;
         if (frame >= frame_count) {
             state = (audio_playback_is_busy() || tts_was_busy) ? PET_STATE_WAVING : working_state;
@@ -315,9 +309,6 @@ int main()
     }
 
      /* Module Exit */
-    //  free(BlackImage);
-    //  BlackImage = NULL;
-     
      DEV_Module_Exit();
 }
 
