@@ -279,6 +279,7 @@ int main()
 
     /*Audio Init*/
     printf("Audio initializing...\r\n");
+    mclk_pio_init();
     es8311_init(pico_audio);
     es8311_sample_frequency_config(pico_audio.mclk_freq, pico_audio.sample_freq);
     es8311_microphone_config();

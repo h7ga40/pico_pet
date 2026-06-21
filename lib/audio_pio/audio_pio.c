@@ -38,6 +38,8 @@
 #include "audio_pio.h"
 #include "audio_pio.pio.h"
 
+static bool mclk_initialized;
+
 /******************************************************************************
 function: Mclk frequency modification
 parameter:
@@ -118,11 +120,17 @@ parameter:
 ******************************************************************************/	
 void mclk_pio_init()
 {
+    if (mclk_initialized) {
+        set_mclk_frequency(pico_audio.mclk_freq);
+        return;
+    }
+
     pio_sm_claim(pico_audio.pio_1, pico_audio.sm_mclk);
     uint offset = pio_add_program(pico_audio.pio_1, &mclk_pio_program);
     mclk_pio_program_init(pico_audio.pio_1, pico_audio.sm_mclk, offset, pico_audio.audio_mclk);
     set_mclk_frequency(pico_audio.mclk_freq);
     pio_sm_set_enabled(pico_audio.pio_1, pico_audio.sm_mclk , true);
+    mclk_initialized = true;
 }
 
 #define AUDIO_BLOCK_FRAMES       (PICO_SAMPLE_FREQ / 50)
