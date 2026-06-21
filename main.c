@@ -38,6 +38,25 @@ void Touch_INT_callback(uint gpio, uint32_t events);
 
 static uint32_t tts_random_state;
 
+#define PC_PLAY_SAMPLE_RATE 16000u
+#define PC_PLAY_BLOCK_SAMPLES (PICO_SAMPLE_FREQ / 50)
+
+typedef enum {
+    SERIAL_COMMAND,
+    SERIAL_PLAY_RECEIVING,
+    SERIAL_PLAY_DRAINING,
+} serial_audio_state_t;
+
+static serial_audio_state_t serial_audio_state = SERIAL_COMMAND;
+static int16_t pc_play_block[PC_PLAY_BLOCK_SAMPLES];
+static size_t pc_play_block_samples;
+static size_t pc_play_block_target;
+static size_t pc_play_total_samples;
+static size_t pc_play_received_samples;
+static uint8_t pc_play_low_byte;
+static bool pc_play_have_low_byte;
+static bool pc_play_announced;
+
 static bool play_random_tts(void)
 {
     if (g_tts_pcm_phrase_count == 0 || audio_playback_is_busy())
@@ -95,6 +114,37 @@ static void stream_pcm_data(uint32_t seconds)
 
 bool tts_was_busy = false;
 
+static void pc_play_request_next_block(void)
+{
+    pc_play_block_target = audio_play_stream_writable_samples();
+    if (pc_play_block_target > 0) {
+        printf("READY PLAY %u\n", (unsigned)pc_play_block_target);
+    }
+}
+
+static void pc_play_accept_block(void)
+{
+    if (!audio_play_stream_write(pc_play_block, pc_play_block_samples)) {
+        printf("ERROR playback buffer\n");
+        return;
+    }
+
+    pc_play_received_samples += pc_play_block_samples;
+    pc_play_block_samples = 0;
+    if (!pc_play_announced) {
+        pc_play_announced = true;
+        printf("PLAYING\n");
+    }
+
+    if (pc_play_received_samples == pc_play_total_samples) {
+        serial_audio_state = SERIAL_PLAY_DRAINING;
+        printf("PLAY RECEIVED\n");
+        return;
+    }
+
+    pc_play_request_next_block();
+}
+
 static void process_command(const char *linebuf)
 {
     if (strcmp(linebuf, "idle") == 0) {
@@ -140,6 +190,23 @@ static void process_command(const char *linebuf)
         } else {
             printf("TTS playback busy\n");
         }
+    } else if (strncmp(linebuf, "play ", 5) == 0) {
+        unsigned long sample_count;
+        unsigned int sample_rate;
+        if (sscanf(linebuf + 5, "%lu %u", &sample_count, &sample_rate) != 2 ||
+            sample_count == 0 || sample_rate != PC_PLAY_SAMPLE_RATE ||
+            !audio_play_stream_start(sample_count)) {
+            printf("ERROR play expects: play <samples> 16000\n");
+            return;
+        }
+
+        pc_play_total_samples = sample_count;
+        pc_play_received_samples = 0;
+        pc_play_block_samples = 0;
+        pc_play_have_low_byte = false;
+        pc_play_announced = false;
+        serial_audio_state = SERIAL_PLAY_RECEIVING;
+        pc_play_request_next_block();
     } else {
         printf("Unknown command: %s\n", linebuf);
     }
@@ -150,7 +217,40 @@ static void poll_serial_commands(void)
     static char linebuf[128];
     static int linepos = 0;
 
+    if (serial_audio_state == SERIAL_PLAY_DRAINING) {
+        if (!audio_playback_is_busy()) {
+            serial_audio_state = SERIAL_COMMAND;
+            printf("PLAY DONE\n");
+        }
+        return;
+    }
+
     while(1) {
+        if (serial_audio_state == SERIAL_PLAY_RECEIVING) {
+            if (pc_play_block_target == 0) {
+                pc_play_request_next_block();
+                if (pc_play_block_target == 0)
+                    break;
+            }
+
+            int c = getchar_timeout_us(0);
+            if (c == PICO_ERROR_TIMEOUT || c == PICO_ERROR_NO_DATA)
+                break;
+
+            if (!pc_play_have_low_byte) {
+                pc_play_low_byte = (uint8_t)c;
+                pc_play_have_low_byte = true;
+                continue;
+            }
+
+            pc_play_block[pc_play_block_samples++] =
+                (int16_t)((uint16_t)pc_play_low_byte | ((uint16_t)(uint8_t)c << 8));
+            pc_play_have_low_byte = false;
+            if (pc_play_block_samples == pc_play_block_target)
+                pc_play_accept_block();
+            continue;
+        }
+
         int c = getchar_timeout_us(0);
         if (c == PICO_ERROR_TIMEOUT || c == PICO_ERROR_NO_DATA)
             break;
@@ -231,7 +331,8 @@ int main()
         if (time_reached(next_audio_process)) {
             int16_t wakeword_samples[PICO_SAMPLE_FREQ / 50];
             if (audio_playback_is_busy()) {
-                tts_was_busy = true;
+                if (serial_audio_state == SERIAL_COMMAND)
+                    tts_was_busy = true;
             } else if (tts_was_busy) {
                 tts_was_busy = false;
                 wakeword_set_debug_enabled(true);

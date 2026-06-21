@@ -109,6 +109,9 @@ size_t audio_input_read_next(int16_t *samples, size_t capacity);
 size_t audio_input_read_latest(int16_t *samples, size_t capacity);
 size_t audio_input_copy_latest(int16_t *samples, size_t capacity);
 bool audio_play_pcm16_start(const int16_t *samples, size_t sample_count);
+bool audio_play_stream_start(size_t sample_count);
+size_t audio_play_stream_writable_samples(void);
+bool audio_play_stream_write(const int16_t *samples, size_t sample_count);
 bool audio_playback_is_busy(void);
 
 #endif //_PICO_AUDIO_PIO_H
