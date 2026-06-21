@@ -73,6 +73,7 @@ static bool play_random_tts(void)
     if (!audio_play_pcm16_start(phrase->samples, phrase->sample_count))
         return false;
 
+    es8311_voice_mute(false);
     wakeword_set_debug_enabled(false);
     printf("TTS PCM playback: phrase=%u samples=%u at 16000 Hz\n",
            (unsigned)index, (unsigned)phrase->sample_count);
@@ -206,6 +207,7 @@ static void process_command(const char *linebuf)
         pc_play_have_low_byte = false;
         pc_play_announced = false;
         serial_audio_state = SERIAL_PLAY_RECEIVING;
+        es8311_voice_mute(false);
         pc_play_request_next_block();
     } else {
         printf("Unknown command: %s\n", linebuf);
@@ -219,6 +221,7 @@ static void poll_serial_commands(void)
 
     if (serial_audio_state == SERIAL_PLAY_DRAINING) {
         if (!audio_playback_is_busy()) {
+            es8311_voice_mute(true);
             serial_audio_state = SERIAL_COMMAND;
             printf("PLAY DONE\n");
         }
@@ -285,6 +288,7 @@ int main()
     es8311_microphone_config();
     es8311_voice_volume_set(pico_audio.volume);
     es8311_microphone_gain_set(pico_audio.mic_gain);
+    es8311_voice_mute(true);
     audio_loopback_start();
     wakeword_init();
 
@@ -336,6 +340,7 @@ int main()
                     tts_was_busy = true;
             } else if (tts_was_busy) {
                 tts_was_busy = false;
+                es8311_voice_mute(true);
                 wakeword_set_debug_enabled(true);
                 state = working_state;
                 printf("TTS playback complete\n");
