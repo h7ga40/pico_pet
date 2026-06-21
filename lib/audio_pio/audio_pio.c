@@ -38,6 +38,8 @@
 #include "audio_pio.h"
 #include "audio_pio.pio.h"
 
+static bool mclk_initialized;
+
 /******************************************************************************
 function: Mclk frequency modification
 parameter:
@@ -118,17 +120,30 @@ parameter:
 ******************************************************************************/	
 void mclk_pio_init()
 {
+    if (mclk_initialized) {
+        set_mclk_frequency(pico_audio.mclk_freq);
+        return;
+    }
+
     pio_sm_claim(pico_audio.pio_1, pico_audio.sm_mclk);
     uint offset = pio_add_program(pico_audio.pio_1, &mclk_pio_program);
     mclk_pio_program_init(pico_audio.pio_1, pico_audio.sm_mclk, offset, pico_audio.audio_mclk);
     set_mclk_frequency(pico_audio.mclk_freq);
     pio_sm_set_enabled(pico_audio.pio_1, pico_audio.sm_mclk , true);
+    mclk_initialized = true;
 }
 
 #define AUDIO_BLOCK_FRAMES       (PICO_SAMPLE_FREQ / 50)
 // Keep enough input history to cover one AMOLED refresh without reserving 1 s of SRAM.
 #define INPUT_BUFFER_BLOCKS      8
 #define OUTPUT_BUFFER_BLOCKS     2
+#define PLAY_STREAM_BLOCKS       16
+
+typedef enum {
+    PLAYBACK_NONE,
+    PLAYBACK_STATIC,
+    PLAYBACK_STREAM,
+} playback_source_t;
 
 static int32_t input_buffer[INPUT_BUFFER_BLOCKS][AUDIO_BLOCK_FRAMES];
 static int32_t output_buffer[OUTPUT_BUFFER_BLOCKS][AUDIO_BLOCK_FRAMES];
@@ -144,14 +159,35 @@ static size_t playback_sample_count;
 static size_t playback_sample_index;
 static volatile bool playback_running;
 static bool playback_final_block[OUTPUT_BUFFER_BLOCKS];
+static playback_source_t playback_source;
+static int16_t play_stream[PLAY_STREAM_BLOCKS][AUDIO_BLOCK_FRAMES];
+static uint16_t play_stream_counts[PLAY_STREAM_BLOCKS];
+static volatile uint32_t play_stream_read_block;
+static volatile uint32_t play_stream_write_block;
+static volatile uint32_t play_stream_ready_blocks;
+static size_t play_stream_expected_samples;
+static size_t play_stream_received_samples;
 
 static void playback_fill_block(uint32_t block)
 {
-    size_t remaining = playback_sample_count - playback_sample_index;
-    size_t count = remaining < AUDIO_BLOCK_FRAMES ? remaining : AUDIO_BLOCK_FRAMES;
+    size_t count = 0;
+    const int16_t *samples = NULL;
+
+    if (playback_source == PLAYBACK_STATIC) {
+        size_t remaining = playback_sample_count - playback_sample_index;
+        count = remaining < AUDIO_BLOCK_FRAMES ? remaining : AUDIO_BLOCK_FRAMES;
+        samples = &playback_samples[playback_sample_index];
+        playback_sample_index += count;
+    } else if (playback_source == PLAYBACK_STREAM && play_stream_ready_blocks > 0) {
+        uint32_t source_block = play_stream_read_block;
+        count = play_stream_counts[source_block];
+        samples = play_stream[source_block];
+        play_stream_read_block = (source_block + 1) % PLAY_STREAM_BLOCKS;
+        play_stream_ready_blocks--;
+    }
 
     for (size_t i = 0; i < count; ++i) {
-        int16_t sample = playback_samples[playback_sample_index++];
+        int16_t sample = samples[i];
         uint32_t packed = (uint32_t)(uint16_t)sample << 16;
         if (pico_audio.channel_count != 1)
             packed |= (uint16_t)sample;
@@ -161,7 +197,25 @@ static void playback_fill_block(uint32_t block)
         memset(&output_buffer[block][count], 0,
                (AUDIO_BLOCK_FRAMES - count) * sizeof(output_buffer[block][0]));
     }
-    playback_final_block[block] = playback_sample_index >= playback_sample_count;
+    playback_final_block[block] =
+        playback_source == PLAYBACK_STATIC && playback_sample_index >= playback_sample_count;
+    if (playback_source == PLAYBACK_STREAM && count > 0)
+        playback_final_block[block] =
+            play_stream_received_samples == play_stream_expected_samples &&
+            play_stream_ready_blocks == 0;
+}
+
+static void playback_start_locked(void)
+{
+    dma_channel_abort(loopback_tx_dma);
+    dma_channel_acknowledge_irq1(loopback_tx_dma);
+    pio_sm_clear_fifos(pico_audio.pio_2, pico_audio.sm_dout);
+    playback_running = true;
+    output_active_block = 0;
+    playback_fill_block(0);
+    playback_fill_block(1);
+    dma_channel_set_read_addr(loopback_tx_dma, output_buffer[0], false);
+    dma_channel_set_trans_count(loopback_tx_dma, AUDIO_BLOCK_FRAMES, true);
 }
 
 static void loopback_dma_handler(void)
@@ -186,6 +240,7 @@ static void loopback_dma_handler(void)
             if (playback_final_block[completed_block]) {
                 playback_running = false;
                 playback_samples = NULL;
+                playback_source = PLAYBACK_NONE;
                 memset(output_buffer, 0, sizeof(output_buffer));
                 output_active_block = 0;
             } else {
@@ -250,30 +305,70 @@ size_t audio_input_copy_latest(int16_t *samples, size_t capacity)
 
 bool audio_play_pcm16_start(const int16_t *samples, size_t sample_count)
 {
-    if (!loopback_running || playback_running || samples == NULL || sample_count == 0)
+    if (!loopback_running || playback_source != PLAYBACK_NONE ||
+        samples == NULL || sample_count == 0)
         return false;
 
     irq_set_enabled(DMA_IRQ_1, false);
-    dma_channel_abort(loopback_tx_dma);
-    dma_channel_acknowledge_irq1(loopback_tx_dma);
-    pio_sm_clear_fifos(pico_audio.pio_2, pico_audio.sm_dout);
     playback_samples = samples;
     playback_sample_count = sample_count;
     playback_sample_index = 0;
-    playback_running = true;
-    output_active_block = 0;
-    playback_fill_block(0);
-    if (!playback_final_block[0])
-        playback_fill_block(1);
-    dma_channel_set_read_addr(loopback_tx_dma, output_buffer[0], false);
-    dma_channel_set_trans_count(loopback_tx_dma, AUDIO_BLOCK_FRAMES, true);
+    playback_source = PLAYBACK_STATIC;
+    playback_start_locked();
+    irq_set_enabled(DMA_IRQ_1, true);
+    return true;
+}
+
+bool audio_play_stream_start(size_t sample_count)
+{
+    if (!loopback_running || playback_source != PLAYBACK_NONE || sample_count == 0)
+        return false;
+
+    irq_set_enabled(DMA_IRQ_1, false);
+    playback_source = PLAYBACK_STREAM;
+    playback_running = false;
+    play_stream_read_block = 0;
+    play_stream_write_block = 0;
+    play_stream_ready_blocks = 0;
+    play_stream_expected_samples = sample_count;
+    play_stream_received_samples = 0;
+    irq_set_enabled(DMA_IRQ_1, true);
+    return true;
+}
+
+size_t audio_play_stream_writable_samples(void)
+{
+    if (playback_source != PLAYBACK_STREAM ||
+        play_stream_ready_blocks >= PLAY_STREAM_BLOCKS ||
+        play_stream_received_samples >= play_stream_expected_samples)
+        return 0;
+
+    size_t remaining = play_stream_expected_samples - play_stream_received_samples;
+    return remaining < AUDIO_BLOCK_FRAMES ? remaining : AUDIO_BLOCK_FRAMES;
+}
+
+bool audio_play_stream_write(const int16_t *samples, size_t sample_count)
+{
+    size_t writable = audio_play_stream_writable_samples();
+    if (samples == NULL || sample_count == 0 || sample_count != writable)
+        return false;
+
+    irq_set_enabled(DMA_IRQ_1, false);
+    uint32_t block = play_stream_write_block;
+    memcpy(play_stream[block], samples, sample_count * sizeof(samples[0]));
+    play_stream_counts[block] = (uint16_t)sample_count;
+    play_stream_write_block = (block + 1) % PLAY_STREAM_BLOCKS;
+    play_stream_ready_blocks++;
+    play_stream_received_samples += sample_count;
+    if (!playback_running)
+        playback_start_locked();
     irq_set_enabled(DMA_IRQ_1, true);
     return true;
 }
 
 bool audio_playback_is_busy(void)
 {
-    return playback_running;
+    return playback_source != PLAYBACK_NONE;
 }
 
 void audio_loopback_start(void)
@@ -294,6 +389,7 @@ void audio_loopback_start(void)
     input_completed_blocks = 0;
     output_active_block = 0;
     playback_running = false;
+    playback_source = PLAYBACK_NONE;
     playback_final_block[0] = false;
     playback_final_block[1] = false;
     last_read_input_sequence = UINT32_MAX;

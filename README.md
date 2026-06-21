@@ -137,10 +137,23 @@ python scripts\generate_tts_wavs.py
 ファームウェア用PCMテーブルへ変換されます。ウェイクワード検出時とシリアルの
 `tts`コマンド実行時に、いずれか1つをランダムに選び、アニメーションを止めずに再生します。
 
+### PCからのPCMストリーミング再生
+
+PCで生成したWAVは、ファームウェアへ埋め込まずUSB CDC経由で再生できます。入力は
+16 kHz、16-bit、モノラル、非圧縮PCM WAVに限ります。
+
+```powershell
+python scripts\play_wav.py COM5 input.wav
+```
+
+PCとRP2350は20 ms（320サンプル）単位で送受信を同期します。RP2350は全PCMを保持せず、
+16ブロックのリングバッファからI2Sへ出力します。
+
 ## scripts
 
 - `pet_spritesheet_to_bins.py`: ペット画像変換
 - `record_wav.py`: 任意パスへの録音
+- `play_wav.py`: USB CDC経由のPCMストリーミング再生
 - `collect_sample.py`: クラスを指定した単発収録
 - `collect_unclassified.py`: 音量区間の連続収録
 - `classify_samples_stt.py`: 未分類WAVのSTT分類

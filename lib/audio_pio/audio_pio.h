@@ -41,18 +41,15 @@
 #define PICO_MCLK_FREQ      (16000 * 256)
 #define PICO_SAMPLE_FREQ    16000
 #define PICO_AUDIO_VOLUME   73
-#define PICO_AUDIO_COUNT    1
+#define PICO_AUDIO_COUNT    2  // Duplicate mono playback PCM to both I2S slots.
 #define PICO_AUDIO_RES_IN   16
 #define PICO_AUDIO_RES_OUT  16
 #define PICO_AUDIO_MIC_GAIN 5  // ES8311_MIC_GAIN_30DB
-#define PICO_AUDIO_COUNT    1
 #define PICO_AUDIO_DOUT     20
 #define PICO_AUDIO_DIN      21
 #define PICO_AUDIO_MCLK     22
 #define PICO_AUDIO_LRCLK    23
 #define PICO_AUDIO_BCLK     24
-#define PICO_AUDIO_PIO_1    0
-#define PICO_AUDIO_PIO_2    0
 #define PICO_AUDIO_SM_DOUT  0
 #define PICO_AUDIO_SM_DIN   1
 #define PICO_AUDIO_SM_MCLK  2
@@ -109,6 +106,9 @@ size_t audio_input_read_next(int16_t *samples, size_t capacity);
 size_t audio_input_read_latest(int16_t *samples, size_t capacity);
 size_t audio_input_copy_latest(int16_t *samples, size_t capacity);
 bool audio_play_pcm16_start(const int16_t *samples, size_t sample_count);
+bool audio_play_stream_start(size_t sample_count);
+size_t audio_play_stream_writable_samples(void);
+bool audio_play_stream_write(const int16_t *samples, size_t sample_count);
 bool audio_playback_is_busy(void);
 
 #endif //_PICO_AUDIO_PIO_H

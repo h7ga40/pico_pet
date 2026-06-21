@@ -5,7 +5,6 @@
 #include "FT3168.h"
 #include "es8311.h"
 #include "build/pets/zundamon/generated/pet_images.h"
-#include "GUI_Paint.h"
 #include "wakeword.h"
 #include "tts_phrase_pcm.h"
 #include <stdio.h>
@@ -20,8 +19,6 @@ uint8_t i2c_lock = 0;
 pet_state_t working_state = 0;
 #define I2C_LOCK() i2c_lock = 1
 #define I2C_UNLOCK() i2c_lock = 0
-
-UWORD BlackImage[AMOLED_1IN8_HEIGHT*AMOLED_1IN8_WIDTH];
 
 static const uint16_t pet_frame_intervals_ms[PET_IMAGE_STATE_COUNT] = {
     [PET_STATE_IDLE] = 1000,
@@ -41,6 +38,25 @@ void Touch_INT_callback(uint gpio, uint32_t events);
 
 static uint32_t tts_random_state;
 
+#define PC_PLAY_SAMPLE_RATE 16000u
+#define PC_PLAY_BLOCK_SAMPLES (PICO_SAMPLE_FREQ / 50)
+
+typedef enum {
+    SERIAL_COMMAND,
+    SERIAL_PLAY_RECEIVING,
+    SERIAL_PLAY_DRAINING,
+} serial_audio_state_t;
+
+static serial_audio_state_t serial_audio_state = SERIAL_COMMAND;
+static int16_t pc_play_block[PC_PLAY_BLOCK_SAMPLES];
+static size_t pc_play_block_samples;
+static size_t pc_play_block_target;
+static size_t pc_play_total_samples;
+static size_t pc_play_received_samples;
+static uint8_t pc_play_low_byte;
+static bool pc_play_have_low_byte;
+static bool pc_play_announced;
+
 static bool play_random_tts(void)
 {
     if (g_tts_pcm_phrase_count == 0 || audio_playback_is_busy())
@@ -57,6 +73,7 @@ static bool play_random_tts(void)
     if (!audio_play_pcm16_start(phrase->samples, phrase->sample_count))
         return false;
 
+    es8311_voice_mute(false);
     wakeword_set_debug_enabled(false);
     printf("TTS PCM playback: phrase=%u samples=%u at 16000 Hz\n",
            (unsigned)index, (unsigned)phrase->sample_count);
@@ -97,6 +114,37 @@ static void stream_pcm_data(uint32_t seconds)
 }
 
 bool tts_was_busy = false;
+
+static void pc_play_request_next_block(void)
+{
+    pc_play_block_target = audio_play_stream_writable_samples();
+    if (pc_play_block_target > 0) {
+        printf("READY PLAY %u\n", (unsigned)pc_play_block_target);
+    }
+}
+
+static void pc_play_accept_block(void)
+{
+    if (!audio_play_stream_write(pc_play_block, pc_play_block_samples)) {
+        printf("ERROR playback buffer\n");
+        return;
+    }
+
+    pc_play_received_samples += pc_play_block_samples;
+    pc_play_block_samples = 0;
+    if (!pc_play_announced) {
+        pc_play_announced = true;
+        printf("PLAYING\n");
+    }
+
+    if (pc_play_received_samples == pc_play_total_samples) {
+        serial_audio_state = SERIAL_PLAY_DRAINING;
+        printf("PLAY RECEIVED\n");
+        return;
+    }
+
+    pc_play_request_next_block();
+}
 
 static void process_command(const char *linebuf)
 {
@@ -143,6 +191,24 @@ static void process_command(const char *linebuf)
         } else {
             printf("TTS playback busy\n");
         }
+    } else if (strncmp(linebuf, "play ", 5) == 0) {
+        unsigned long sample_count;
+        unsigned int sample_rate;
+        if (sscanf(linebuf + 5, "%lu %u", &sample_count, &sample_rate) != 2 ||
+            sample_count == 0 || sample_rate != PC_PLAY_SAMPLE_RATE ||
+            !audio_play_stream_start(sample_count)) {
+            printf("ERROR play expects: play <samples> 16000\n");
+            return;
+        }
+
+        pc_play_total_samples = sample_count;
+        pc_play_received_samples = 0;
+        pc_play_block_samples = 0;
+        pc_play_have_low_byte = false;
+        pc_play_announced = false;
+        serial_audio_state = SERIAL_PLAY_RECEIVING;
+        es8311_voice_mute(false);
+        pc_play_request_next_block();
     } else {
         printf("Unknown command: %s\n", linebuf);
     }
@@ -153,7 +219,41 @@ static void poll_serial_commands(void)
     static char linebuf[128];
     static int linepos = 0;
 
+    if (serial_audio_state == SERIAL_PLAY_DRAINING) {
+        if (!audio_playback_is_busy()) {
+            es8311_voice_mute(true);
+            serial_audio_state = SERIAL_COMMAND;
+            printf("PLAY DONE\n");
+        }
+        return;
+    }
+
     while(1) {
+        if (serial_audio_state == SERIAL_PLAY_RECEIVING) {
+            if (pc_play_block_target == 0) {
+                pc_play_request_next_block();
+                if (pc_play_block_target == 0)
+                    break;
+            }
+
+            int c = getchar_timeout_us(0);
+            if (c == PICO_ERROR_TIMEOUT || c == PICO_ERROR_NO_DATA)
+                break;
+
+            if (!pc_play_have_low_byte) {
+                pc_play_low_byte = (uint8_t)c;
+                pc_play_have_low_byte = true;
+                continue;
+            }
+
+            pc_play_block[pc_play_block_samples++] =
+                (int16_t)((uint16_t)pc_play_low_byte | ((uint16_t)(uint8_t)c << 8));
+            pc_play_have_low_byte = false;
+            if (pc_play_block_samples == pc_play_block_target)
+                pc_play_accept_block();
+            continue;
+        }
+
         int c = getchar_timeout_us(0);
         if (c == PICO_ERROR_TIMEOUT || c == PICO_ERROR_NO_DATA)
             break;
@@ -182,11 +282,13 @@ int main()
 
     /*Audio Init*/
     printf("Audio initializing...\r\n");
+    mclk_pio_init();
     es8311_init(pico_audio);
     es8311_sample_frequency_config(pico_audio.mclk_freq, pico_audio.sample_freq);
     es8311_microphone_config();
     es8311_voice_volume_set(pico_audio.volume);
     es8311_microphone_gain_set(pico_audio.mic_gain);
+    es8311_voice_mute(true);
     audio_loopback_start();
     wakeword_init();
 
@@ -206,12 +308,8 @@ int main()
     AMOLED_1IN8_Init();
     AMOLED_1IN8_SetBrightness(100);
 
-    /* Create a new image cache named IMAGE_RGB and fill it with white*/
-    Paint_NewImage((UBYTE *)BlackImage, AMOLED_1IN8.WIDTH, AMOLED_1IN8.HEIGHT, 0, WHITE);
-    Paint_SetScale(65);
-    Paint_SetRotate(ROTATE_0);
-    Paint_Clear(BLACK);
-    AMOLED_1IN8_Display(BlackImage);
+    /* The AMOLED retains its own framebuffer, so no MCU framebuffer is needed. */
+    AMOLED_1IN8_Clear(0x0000);
 
     /* QMI8658 Init */
     float acc[3], gyro[3];
@@ -238,9 +336,11 @@ int main()
         if (time_reached(next_audio_process)) {
             int16_t wakeword_samples[PICO_SAMPLE_FREQ / 50];
             if (audio_playback_is_busy()) {
-                tts_was_busy = true;
+                if (serial_audio_state == SERIAL_COMMAND)
+                    tts_was_busy = true;
             } else if (tts_was_busy) {
                 tts_was_busy = false;
+                es8311_voice_mute(true);
                 wakeword_set_debug_enabled(true);
                 state = working_state;
                 printf("TTS playback complete\n");
@@ -301,11 +401,12 @@ int main()
         }
         next_frame_update = make_timeout_time_ms(pet_frame_intervals_ms[state]);
 
-        Paint_DrawImage(PIC[frame].data,
-                        (AMOLED_1IN8.WIDTH - PET_IMAGE_WIDTH) / 2 + pet_image_offset_x,
-                        (AMOLED_1IN8.HEIGHT - PET_IMAGE_HEIGHT) / 2 + pet_image_offset_y,
-                        PET_IMAGE_WIDTH, PET_IMAGE_HEIGHT);
-        AMOLED_1IN8_Display(BlackImage);
+        AMOLED_1IN8_DisplayPackedWindow(
+            (AMOLED_1IN8.WIDTH - PET_IMAGE_WIDTH) / 2 + pet_image_offset_x,
+            (AMOLED_1IN8.HEIGHT - PET_IMAGE_HEIGHT) / 2 + pet_image_offset_y,
+            PET_IMAGE_WIDTH,
+            PET_IMAGE_HEIGHT,
+            PIC[frame].data);
         frame++;
         if (frame >= frame_count) {
             state = (audio_playback_is_busy() || tts_was_busy) ? PET_STATE_WAVING : working_state;
@@ -315,9 +416,6 @@ int main()
     }
 
      /* Module Exit */
-    //  free(BlackImage);
-    //  BlackImage = NULL;
-     
      DEV_Module_Exit();
 }
 

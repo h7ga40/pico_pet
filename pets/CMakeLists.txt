@@ -32,6 +32,8 @@ add_custom_command(
         --objcopy ${CMAKE_OBJCOPY}
         --objcopy-output-format elf32-littlearm
         --objcopy-architecture armv8-m.main
+        --objcopy-extra-arg=--set-section-alignment
+        --objcopy-extra-arg=.data=4
         --objcopy-section .rodata
         --ar ${CMAKE_AR}
         --clean
